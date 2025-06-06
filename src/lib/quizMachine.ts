@@ -1,5 +1,4 @@
-import { assign, createMachine, fromCallback, sendTo, setup } from 'xstate';
-import { evaluateGuard } from 'xstate/guards';
+import { assign, fromCallback, sendTo, setup } from 'xstate';
 
 export interface Context<E, R> {
 	currentQuestion: E;
@@ -20,7 +19,12 @@ export interface Context<E, R> {
 		payload?: R;
 	};
 	responseLoggerFn: (question: E, response: R) => void;
-	eventsLoggerFn: (event: string, context: Context<E, R>) => void;
+	eventsLogger: {
+		info: (message: string) => void;
+		error: (message: string) => void;
+		debug: (message: string) => void;
+		warn: (message: string) => void;
+	};
 	responses: {
 		correct: boolean;
 		question: E;
@@ -70,6 +74,9 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 			shouldGoToNextQuestion: ({ context }) => {
 				const last = context.responses.at(-1);
 				return last?.correct || context.noOfAttempts + 1 >= context.maxAttemptPerQuestion;
+			},
+			logTransition: ({ context, event }) => {
+				context.eventsLogger.info();
 			}
 		},
 		actions: {

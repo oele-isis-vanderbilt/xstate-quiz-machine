@@ -6,6 +6,25 @@
 	import type { SimpleQuestion } from '$lib/types';
 	import type { MachineSnapshot, SnapshotFrom } from 'xstate';
 
+	const logger = {
+		debug: (message: string) => {
+			const formattedMessage = `[DEBUG] - ${new Date().toISOString()}: ${message}`;
+			console.debug(formattedMessage);
+		},
+		info: (message: string) => {
+			const formattedMessage = `[INFO] - ${new Date().toISOString()}: ${message}`;
+			console.info(formattedMessage);
+		},
+		warn: (message: string) => {
+			const formattedMessage = `[WARN] - ${new Date().toISOString()}: ${message}`;
+			console.warn(formattedMessage);
+		},
+		error: (message: string) => {
+			const formattedMessage = `[ERROR] - ${new Date().toISOString()}: ${message}`;
+			console.error(formattedMessage);
+		}
+	};
+
 	let questions: SimpleQuestion[] = [
 		{
 			id: '1',
@@ -68,9 +87,7 @@
 				payload: response
 			};
 		},
-		eventsLoggerFn: (event) => {
-			console.log('Event:', event);
-		},
+		eventsLogger: logger,
 		maxAttemptPerQuestion: 3,
 		responseLoggerFn: (question, response) => {
 			console.log(`Response for question ${question.id}:`, response);

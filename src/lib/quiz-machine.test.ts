@@ -26,10 +26,16 @@ describe('quiz machine', () => {
 		responseLoggerFn: vi.fn(),
 		currentQuestion: simpleQuestions[2],
 		elapsedTime: 0,
-		eventsLoggerFn: vi.fn(),
+		eventsLogger: {
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn()
+		},
 		graderFn: vi.fn(),
 		maxAttemptPerQuestion: 2,
-		reviewDuration: 30
+		reviewDuration: 30,
+		noOfAttempts: 0
 	};
 
 	it('should initialize the quiz machine with the correct question', () => {
