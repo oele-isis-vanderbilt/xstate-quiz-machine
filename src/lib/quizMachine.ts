@@ -74,9 +74,6 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 			shouldGoToNextQuestion: ({ context }) => {
 				const last = context.responses.at(-1);
 				return last?.correct || context.noOfAttempts + 1 >= context.maxAttemptPerQuestion;
-			},
-			logTransition: ({ context, event }) => {
-				context.eventsLogger.info();
 			}
 		},
 		actions: {
