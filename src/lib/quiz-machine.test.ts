@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Commands, createQuizMachine, QuizStates } from './quizMachine';
-import type { Context } from './quizMachine';
+import type { InitialContext } from './quizMachine';
 import { createActor } from 'xstate';
 let simpleQuestions = [
 	{ id: '1', text: 'What is 2 + 2?', answer: '4' },
@@ -9,7 +9,7 @@ let simpleQuestions = [
 ];
 
 describe('quiz machine', () => {
-	const initialContext: Context<
+	const initialContext: InitialContext<
 		{
 			id: string;
 			text: string;
@@ -22,7 +22,7 @@ describe('quiz machine', () => {
 		stateStartTime: Date.now(),
 		attemptDuration: 60,
 		timeLeft: 60,
-		responses: [],
+		events: [],
 		responseLoggerFn: vi.fn(),
 		currentQuestion: simpleQuestions[2],
 		elapsedTime: 0,
@@ -35,7 +35,9 @@ describe('quiz machine', () => {
 		graderFn: vi.fn(),
 		maxAttemptPerQuestion: 2,
 		reviewDuration: 30,
-		noOfAttempts: 0
+		noOfAttempts: 0,
+		attemptStartTime: 0,
+		questionIdentifierFn: (question) => question.id
 	};
 
 	it('should initialize the quiz machine with the correct question', () => {
@@ -47,7 +49,7 @@ describe('quiz machine', () => {
 		expect(snapshot.context.currentQuestionIdx).toBe(0);
 		expect(snapshot.context.currentQuestion.text).toBe('What is 2 + 2?');
 		expect(snapshot.context.questions.length).toBe(3);
-		expect(snapshot.value).toBe(QuizStates.IN_PROGRESS);
+		expect(snapshot.matches(QuizStates.IN_PROGRESS));
 	});
 
 	it('should transition from `IN_PROGRESS` to `REVIEWING` after timeout and `COMPLETED` after timeout for `REVIEWING`', async () => {

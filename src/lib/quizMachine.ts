@@ -1,5 +1,24 @@
 import { assign, fromCallback, sendTo, setup } from 'xstate';
 
+export enum AttemptEvents {
+	RESPONSE = 'response',
+	SKIP = 'skip'
+}
+
+export interface AttemptResponse<R> {
+	correct: boolean;
+	payload?: R;
+	attemptNumber?: number;
+}
+
+export type QuizResponseEvent<E, R> = {
+	type: AttemptEvents;
+	timestamp: number;
+	question: E;
+	timeSpentSeconds?: number;
+	response?: AttemptResponse<R>;
+};
+
 export interface Context<E, R> {
 	currentQuestion: E;
 	maxAttemptPerQuestion: number;
@@ -18,6 +37,7 @@ export interface Context<E, R> {
 		correct: boolean;
 		payload?: R;
 	};
+	questionIdentifierFn: (question: E) => string;
 	responseLoggerFn: (question: E, response: R) => void;
 	eventsLogger: {
 		info: (message: string) => void;
@@ -25,12 +45,37 @@ export interface Context<E, R> {
 		debug: (message: string) => void;
 		warn: (message: string) => void;
 	};
-	responses: {
-		correct: boolean;
-		question: E;
-		payload?: R;
-	}[];
+	events: QuizResponseEvent<E, R>[];
+	stageSummaries: {
+		[QuizStates.IN_PROGRESS]: {
+			questionsAttempted: number;
+			questionsSkipped: number;
+			questionsCorrect: number;
+			questionsIncorrect: number;
+			timeSpentSeconds: number;
+		};
+		[QuizStates.REVIEWING]: {
+			timeSpentSeconds: number;
+		};
+	};
+	attemptStartTime: number;
+	accumulatedTransitionTime: number;
 }
+
+type RequiredContextKeys =
+	| 'questions'
+	| 'graderFn'
+	| 'questionIdentifierFn'
+	| 'responseLoggerFn'
+	| 'maxAttemptPerQuestion'
+	| 'attemptDuration'
+	| 'reviewDuration'
+	| 'maxAttemptPerQuestion';
+
+type OptionalContextKeys = Exclude<keyof Context<any, any>, RequiredContextKeys>;
+
+export type InitialContext<E, R> = Pick<Context<E, R>, RequiredContextKeys> &
+	Partial<Pick<Context<E, R>, OptionalContextKeys>>;
 
 export enum QuizStates {
 	STARTING = 'starting',
@@ -47,18 +92,91 @@ export enum Commands {
 	SKIP = 'skip'
 }
 
-enum InProgressStages {
+export enum InProgressStages {
 	WAITING_FOR_ANSWER = 'waiting_for_answer',
 	GRADING = 'grading'
 }
 
-// const timeOutGuard = ()
+// export const
 
-export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
+export const createQuizMachine = <E, R>(
+	initialContext: InitialContext<E, R>,
+	delayBetweenAttempts: number = 1000
+) => {
+	const createContext = (ctx: InitialContext<E, R>): Context<E, R> => ({
+		attemptDuration: ctx.attemptDuration,
+		questions: ctx.questions,
+		attemptStartTime: ctx.attemptStartTime || Date.now(),
+		currentQuestionIdx: ctx.currentQuestionIdx || 0,
+		currentQuestion: ctx.currentQuestion || ctx.questions[0],
+		elapsedTime: ctx.elapsedTime || 0,
+		stateStartTime: ctx.stateStartTime || Date.now(),
+		timeLeft: ctx.timeLeft || ctx.attemptDuration,
+		events: ctx.events || [],
+		responseLoggerFn: ctx.responseLoggerFn,
+		graderFn: ctx.graderFn,
+		questionIdentifierFn: ctx.questionIdentifierFn,
+		eventsLogger: ctx.eventsLogger || console,
+		maxAttemptPerQuestion: ctx.maxAttemptPerQuestion || 1,
+		reviewDuration: ctx.reviewDuration || 30,
+		noOfAttempts: 0,
+		stageSummaries: ctx.stageSummaries || {
+			[QuizStates.IN_PROGRESS]: {
+				questionsAttempted: 0,
+				questionsSkipped: 0,
+				questionsCorrect: 0,
+				questionsIncorrect: 0,
+				timeSpentSeconds: 0
+			},
+			[QuizStates.REVIEWING]: {
+				timeSpentSeconds: 0
+			}
+		},
+		accumulatedTransitionTime: 0
+	});
+
+	const getInProgressStageSummary = (context: Context<E, R>) => {
+		const attempts = context.events.filter((event) => event.type === AttemptEvents.RESPONSE);
+		const numberOfUniqueQuestionsAttempted = attempts.reduce((acc, event) => {
+			const questionId = context.questionIdentifierFn(event.question);
+			acc.add(questionId);
+			return acc;
+		}, new Set<string>()).size;
+
+		const numberOfUniqueQuestionsIncorrect = attempts
+			.filter((attempt) => !attempt.response?.correct)
+			.reduce((acc, event) => {
+				const questionId = context.questionIdentifierFn(event.question);
+				acc.add(questionId);
+				return acc;
+			}, new Set<string>()).size;
+
+		const numberOfUniqueQuestionsCorrect = attempts
+			.filter((attempt) => attempt.response?.correct)
+			.reduce((acc, event) => {
+				const questionId = context.questionIdentifierFn(event.question);
+				acc.add(questionId);
+				return acc;
+			}, new Set<string>()).size;
+		return {
+			[QuizStates.IN_PROGRESS]: {
+				questionsAttempted: numberOfUniqueQuestionsAttempted,
+				questionsSkipped: context.events.filter((event) => event.type === AttemptEvents.SKIP)
+					.length,
+				questionsCorrect: numberOfUniqueQuestionsCorrect,
+				questionsIncorrect: numberOfUniqueQuestionsIncorrect,
+				timeSpentSeconds: Math.floor((Date.now() - context.stateStartTime) / 1000)
+			}
+		};
+	};
+
 	return setup({
 		types: {
 			context: {} as Context<E, R>,
 			events: {} as { type: Commands; response?: R; question?: E }
+		},
+		delays: {
+			delayBetweenAttempts
 		},
 		guards: {
 			timeoutExceeded: (
@@ -70,38 +188,93 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 			},
 			questionsExhausted: ({ context }) => {
 				return context.currentQuestionIdx + 1 >= context.questions.length;
-			},
-			shouldGoToNextQuestion: ({ context }) => {
-				const last = context.responses.at(-1);
-				return last?.correct || context.noOfAttempts + 1 >= context.maxAttemptPerQuestion;
 			}
 		},
 		actions: {
 			evaluateResponse: assign(({ context, event }) => {
 				const response = event.response!;
+				const timestamp = Date.now();
+				const timeSpentSeconds = Math.floor((timestamp - context.attemptStartTime) / 1000);
 				const question = event.question || context.currentQuestion;
 				const result = context.graderFn(question, response);
+				const noOfAttempts = context.noOfAttempts + 1;
+
+				const responseEvent: QuizResponseEvent<E, R> = {
+					type: AttemptEvents.RESPONSE,
+					timestamp: timestamp,
+					question,
+					response: { ...result, attemptNumber: noOfAttempts },
+					timeSpentSeconds: timeSpentSeconds
+				};
 
 				context.responseLoggerFn(question, response);
-				const updatedResponses = [...context.responses, { ...result, question }];
-				const shoudIncrement =
-					context.noOfAttempts + 1 >= context.maxAttemptPerQuestion || result.correct;
+				const updatedResponses = [...context.events, responseEvent];
 
 				return {
-					responses: updatedResponses,
-					noOfAttempts: shoudIncrement ? 0 : context.noOfAttempts + 1,
-					currentQuestionIdx: shoudIncrement
-						? context.currentQuestionIdx + 1
-						: context.currentQuestionIdx,
-					currentQuestion:
-						context.questions[
-							shoudIncrement ? context.currentQuestionIdx + 1 : context.currentQuestionIdx
-						]
+					events: updatedResponses,
+					noOfAttempts
 				};
 			}),
 			incrementQuestion: assign({
 				currentQuestionIdx: ({ context }) => context.currentQuestionIdx + 1,
-				currentQuestion: ({ context }) => context.questions[context.currentQuestionIdx + 1]
+				currentQuestion: ({ context }) => context.questions[context.currentQuestionIdx + 1],
+				noOfAttempts: ({ context }) => 0
+			}),
+			resetTimeLeft: assign({
+				timeLeft: ({ context }) => 0
+			}),
+			markQuestionSkipped: assign(({ context, event }) => {
+				const timestamp = Date.now();
+				const timeSpent = Math.floor((timestamp - context.attemptStartTime) / 1000);
+				const events = [
+					...context.events,
+					{
+						type: AttemptEvents.SKIP,
+						timestamp: Date.now(),
+						question: event.question || context.currentQuestion,
+						timeSpentSeconds: timeSpent
+					}
+				];
+				return {
+					events
+				};
+			}),
+			setAttemptStartTime: assign({
+				attemptStartTime: () => Date.now()
+			}),
+			summarizeAttemptStage: assign({
+				stageSummaries: ({ context }) => {
+					return {
+						...context.stageSummaries,
+						...getInProgressStageSummary(context)
+					};
+				}
+			}),
+			summarizeReviewStage: assign({
+				stageSummaries: ({ context }) => {
+					return {
+						...context.stageSummaries,
+						[QuizStates.REVIEWING]: {
+							timeSpentSeconds: Math.floor((Date.now() - context.stateStartTime) / 1000)
+						}
+					};
+				}
+			}),
+			conditionalGoToNextQuestion: assign(({ context }) => {
+				const lastEvent = context.events.at(-1);
+				const shouldIncrement =
+					(lastEvent?.type === AttemptEvents.RESPONSE && lastEvent.response?.correct) ||
+					context.noOfAttempts + 1 > context.maxAttemptPerQuestion;
+
+				return {
+					numberOfAttempts: shouldIncrement ? 0 : context.noOfAttempts,
+					currentQuestionIdx: shouldIncrement
+						? context.currentQuestionIdx + 1
+						: context.currentQuestionIdx,
+					currentQuestion: shouldIncrement
+						? context.questions[context.currentQuestionIdx + 1]
+						: context.currentQuestion
+				};
 			})
 		},
 		actors: {
@@ -121,7 +294,7 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 	}).createMachine({
 		id: 'quizMachine',
 		initial: QuizStates.STARTING,
-		context: initialContext,
+		context: createContext(initialContext),
 		states: {
 			[QuizStates.STARTING]: {
 				on: {
@@ -144,6 +317,12 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 				initial: InProgressStages.WAITING_FOR_ANSWER,
 				states: {
 					[InProgressStages.WAITING_FOR_ANSWER]: {
+						entry: [
+							'setAttemptStartTime',
+							assign({
+								accumulatedTransitionTime: () => 0
+							})
+						],
 						on: {
 							[Commands.SUBMIT_ANSWER]: {
 								target: InProgressStages.GRADING
@@ -154,12 +333,7 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 									target: `#quizMachine.${QuizStates.REVIEWING}`
 								},
 								{
-									actions: assign({
-										currentQuestionIdx: ({ context }) => context.currentQuestionIdx + 1,
-										currentQuestion: ({ context }) =>
-											context.questions[context.currentQuestionIdx + 1],
-										noOfAttempts: ({ context }) => 0
-									})
+									actions: ['incrementQuestion', 'markQuestionSkipped']
 								}
 							]
 						}
@@ -170,11 +344,20 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 							{
 								guard: 'questionsExhausted',
 								target: `#quizMachine.${QuizStates.REVIEWING}`
-							},
-							{
-								target: InProgressStages.WAITING_FOR_ANSWER
 							}
-						]
+						],
+						after: {
+							delayBetweenAttempts: {
+								target: InProgressStages.WAITING_FOR_ANSWER,
+								actions: [
+									assign({
+										accumulatedTransitionTime: ({ context }) =>
+											context.accumulatedTransitionTime + delayBetweenAttempts
+									}),
+									'conditionalGoToNextQuestion'
+								]
+							}
+						}
 					}
 				},
 				on: {
@@ -189,14 +372,16 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 						{
 							actions: assign({
 								timeLeft: ({ context }) => {
-									const elapsed = Math.floor((Date.now() - context.stateStartTime) / 1000);
+									const elapsed = Math.floor(
+										(Date.now() - context.stateStartTime - context.accumulatedTransitionTime) / 1000
+									);
 									return Math.max(0, context.attemptDuration - elapsed);
 								}
 							})
 						}
 					]
 				},
-				exit: sendTo('tick', { type: 'stop' })
+				exit: [sendTo('tick', { type: 'stop' }), 'resetTimeLeft', 'summarizeAttemptStage']
 			},
 			[QuizStates.REVIEWING]: {
 				invoke: {
@@ -214,7 +399,7 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 								type: 'timeoutExceeded',
 								params: { durationKey: 'attemptDuration' }
 							},
-							target: QuizStates.COMPLETED
+							target: QuizStates.COMPLETED // return last?.correct || context.noOfAttempts + 1 >= context.maxAttemptPerQuestion;
 						},
 						{
 							actions: assign({
@@ -226,7 +411,7 @@ export const createQuizMachine = <E, R>(initialContext: Context<E, R>) => {
 						}
 					]
 				},
-				exit: sendTo('tick', { type: 'stop' })
+				exit: [sendTo('tick', { type: 'stop' }), 'resetTimeLeft', 'summarizeReviewStage']
 			},
 			[QuizStates.COMPLETED]: {
 				type: 'final'

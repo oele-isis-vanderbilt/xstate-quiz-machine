@@ -1,10 +1,18 @@
 <script lang="ts">
 	import { createQuizMachine } from '$lib';
-	import { Commands, QuizStates, type Context } from '$lib/quizMachine';
+	import {
+		AttemptEvents,
+		Commands,
+		InProgressStages,
+		QuizStates,
+		type Context,
+		type QuizResponseEvent
+	} from '$lib/quizMachine';
 	import { Button, review } from 'flowbite-svelte';
 	import { useActor, useSelector } from '@xstate/svelte';
 	import type { SimpleQuestion } from '$lib/types';
 	import type { MachineSnapshot, SnapshotFrom } from 'xstate';
+	import { Confetti } from 'svelte-confetti';
 
 	const logger = {
 		debug: (message: string) => {
@@ -71,30 +79,41 @@
 				'The blue whale is the largest mammal, reaching lengths of up to 100 feet and weighing as much as 200 tons.'
 		}
 	];
-	const quizMachine = createQuizMachine<SimpleQuestion, string>({
-		questions,
-		attemptDuration: 300,
-		currentQuestion: questions[0],
-		timeLeft: 300,
-		reviewDuration: 300,
-		currentQuestionIdx: 0,
-		elapsedTime: 0,
-		noOfAttempts: 0,
-		graderFn: (question, response) => {
-			console.log(`Grading question ${question.question} with response:`, response);
-			return {
-				correct: question.answer === response,
-				payload: response
-			};
+
+	const friendlyDateTime = (timestamp: number): string => {
+		const date = new Date(timestamp);
+		return date.toLocaleString('en-US', {
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit',
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit'
+		});
+	};
+	const quizMachine = createQuizMachine<SimpleQuestion, string>(
+		{
+			attemptDuration: 300,
+			reviewDuration: 60,
+			maxAttemptPerQuestion: 3,
+			questions: questions,
+			eventsLogger: logger,
+			responseLoggerFn: (question, response) => {
+				logger.info(
+					`Response for question "${question.question}" recorded: ${JSON.stringify(response)}`
+				);
+			},
+			questionIdentifierFn: (question: SimpleQuestion) => question.id,
+			graderFn: (question: SimpleQuestion, response: string) => {
+				return {
+					correct: question.answer === response,
+					payload: response,
+					explanation: question.explaination
+				};
+			}
 		},
-		eventsLogger: logger,
-		maxAttemptPerQuestion: 3,
-		responseLoggerFn: (question, response) => {
-			console.log(`Response for question ${question.id}:`, response);
-		},
-		responses: [],
-		stateStartTime: Date.now()
-	});
+		300
+	);
 
 	const { snapshot, send, actorRef } = useActor(quizMachine);
 
@@ -124,25 +143,52 @@
 		return 'Quiz completed! Review your answers.';
 	}
 
-	function responseJSON(response: {
-		correct: boolean;
-		question: SimpleQuestion;
-		payload?: string | undefined;
-	}): string {
+	function responseJSON(event: QuizResponseEvent<SimpleQuestion, string>): string {
 		return JSON.stringify(
 			{
-				question: response.question.question,
-				response: response.payload,
-				correct: response.correct
+				event: event.type,
+				timestamp: friendlyDateTime(event.timestamp),
+				question: event.question.question,
+				response: event.response?.payload,
+				correct: event.response?.correct,
+				timespent: event.timeSpentSeconds
 			},
 			null,
 			2
 		);
 	}
+
+	let timerText = $derived.by(() => {
+		const timeLeft = $snapshot.context.timeLeft;
+		if (timeLeft <= 0) {
+			return 'Time is up!';
+		}
+		const minutes = Math.floor(timeLeft / 60);
+		const seconds = timeLeft % 60;
+		return `${minutes}m ${seconds}s`;
+	});
+
+	let selectedOptions = $state<string[]>([]);
+
+	function isOptionSelected(option: string): boolean {
+		return selectedOptions.includes(option);
+	}
+
+	function isGrading(): boolean {
+		return $snapshot.matches({ [QuizStates.IN_PROGRESS]: InProgressStages.GRADING });
+	}
+
+	function isCorrectSelection(option: string): boolean {
+		return !!(
+			isGrading() &&
+			$snapshot.context.events.at(-1)?.response?.correct &&
+			$snapshot.context.currentQuestion.answer === option
+		);
+	}
 </script>
 
 <div class="mx-auto flex w-full flex-row gap-2 p-5">
-	<div class="flex w-1/2 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
+	<div class="flex h-full w-1/2 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
 		<h1 class="mb-4 text-3xl font-bold">Quiz App</h1>
 		{#if $snapshot.value === QuizStates.STARTING}
 			<Button
@@ -155,7 +201,7 @@
 				Start Quiz
 			</Button>
 		{/if}
-		{#if $snapshot.matches(QuizStates.REVIEWING) || $snapshot.matches(QuizStates.COMPLETED)}
+		{#if $snapshot.matches(QuizStates.REVIEWING) || $snapshot.matches(QuizStates.IN_PROGRESS)}
 			<div class="flex w-full flex-col gap-2 bg-gray-400 p-2">
 				Time Left: {$snapshot.context.timeLeft} seconds | {getDisplayText($snapshot)}
 			</div>
@@ -171,10 +217,12 @@
 				<div class="mt-4 grid grid-cols-2 gap-2">
 					{#each $snapshot.context.currentQuestion.options as option}
 						<Button
-							outline
-							color="green"
-							class="w-full"
+							outline={isOptionSelected(option) ? false : true}
+							color={isOptionSelected(option) && !isCorrectSelection(option) ? 'red' : 'green'}
+							class={['w-full']}
+							disabled={isGrading() || isOptionSelected(option)}
 							onclick={() => {
+								selectedOptions = [...selectedOptions, option];
 								send({
 									type: Commands.SUBMIT_ANSWER,
 									question: $snapshot.context.currentQuestion,
@@ -182,6 +230,9 @@
 								});
 							}}
 						>
+							{#if isCorrectSelection(option)}
+								<Confetti />
+							{/if}
 							{option}
 						</Button>
 					{/each}
@@ -200,27 +251,50 @@
 				</div>
 			</div>
 		{/if}
+		{#if $snapshot.matches(QuizStates.REVIEWING)}
+			<pre class="overflow-x-auto rounded-md bg-white p-3 text-sm text-gray-800"><code
+					>{JSON.stringify($snapshot.context.stageSummaries, null, 2)}</code
+				></pre>
+		{/if}
 	</div>
+	<div class="flex w-1/2 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
+		<h1 class="mb-4 text-3xl font-bold">Timer</h1>
+		<!-- Huge Timer in between -->
+		<div class="flex h-full items-center justify-center text-6xl font-bold">
+			{#if $snapshot.matches(QuizStates.IN_PROGRESS)}
+				{timerText}
+			{:else if $snapshot.matches(QuizStates.REVIEWING)}
+				Reviewing...
+			{:else if $snapshot.matches(QuizStates.COMPLETED)}
+				Quiz Completed!
+			{:else}
+				Waiting to start...
+			{/if}
+		</div>
+	</div>
+</div>
 
+<div class="mx-auto flex h-1/2 w-full flex-row items-stretch gap-2 p-5">
 	<div class="w-1/2 rounded-lg bg-gray-100 p-4 shadow-sm">
 		<h1 class="mb-4 text-3xl font-bold">FSM</h1>
 		<pre class="overflow-x-auto rounded-md bg-white p-3 text-sm text-gray-800"><code
 				>{contextJSON($snapshot)}</code
 			></pre>
 	</div>
-</div>
-<h1 class="mb-4 text-3xl font-bold">Responses</h1>
-
-<div class="mx-auto flex w-full flex-row gap-2 p-5">
-	<div class="flex max-h-96 w-full flex-col overflow-y-auto rounded-lg bg-gray-100 p-2 shadow-sm">
-		{#each $snapshot.context.responses as response, _}
-			<div class="w-full rounded-lg p-4 shadow-sm">
-				<pre
-					class={[
-						'overflow-x-auto rounded-md p-3 text-sm ',
-						response.correct ? 'bg-green-900 text-white' : 'bg-red-900 text-white'
-					]}><code>{responseJSON(response)}</code></pre>
-			</div>
-		{/each}
+	<div class="flex max-h-96 w-1/2 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
+		<h1 class="mb-4 text-3xl font-bold">Responses</h1>
+		<div class="flex-1 overflow-y-auto">
+			{#each $snapshot.context.events.sort((a, b) => b.timestamp - a.timestamp) as event, _}
+				<div class="w-full rounded-lg p-4 shadow-sm">
+					<pre
+						class={[
+							'overflow-x-auto rounded-md p-3 text-sm',
+							event.type === AttemptEvents.SKIP && 'bg-gray-700 text-white',
+							event.response?.correct && 'bg-green-900 text-white',
+							event.response && event.response.correct === false && 'bg-red-900 text-white'
+						]}><code>{responseJSON(event)}</code></pre>
+				</div>
+			{/each}
+		</div>
 	</div>
 </div>

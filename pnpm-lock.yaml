@@ -90,6 +90,9 @@ importers:
       svelte-check:
         specifier: ^4.0.0
         version: 4.2.1(picomatch@4.0.2)(svelte@5.33.14)(typescript@5.8.3)
+      svelte-confetti:
+        specifier: ^2.3.1
+        version: 2.3.1(svelte@5.33.14)
       tailwindcss:
         specifier: ^4.0.0
         version: 4.1.8
@@ -1774,6 +1777,11 @@ packages:
     peerDependencies:
       svelte: ^4.0.0 || ^5.0.0-next.0
       typescript: '>=5.0.0'
+
+  svelte-confetti@2.3.1:
+    resolution: {integrity: sha512-bKd8etTOeBQyeS9LDPuSd7Oqy5msf0xvxItzsHPajKaarr/LWFzqPq7rp6QQO5rGTzLgM0fmjovOvLkRbrd2gg==}
+    peerDependencies:
+      svelte: '>=5.0.0'
 
   svelte-eslint-parser@1.2.0:
     resolution: {integrity: sha512-mbPtajIeuiyU80BEyGvwAktBeTX7KCr5/0l+uRGLq1dafwRNrjfM5kHGJScEBlPG3ipu6dJqfW/k0/fujvIEVw==}
@@ -3558,6 +3566,10 @@ snapshots:
       typescript: 5.8.3
     transitivePeerDependencies:
       - picomatch
+
+  svelte-confetti@2.3.1(svelte@5.33.14):
+    dependencies:
+      svelte: 5.33.14
 
   svelte-eslint-parser@1.2.0(svelte@5.33.14):
     dependencies:
