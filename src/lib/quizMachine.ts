@@ -1,4 +1,5 @@
 import { assign, fromCallback, sendTo, setup } from 'xstate';
+import type { EventObject } from 'xstate';
 
 export enum AttemptEvents {
 	RESPONSE = 'response',
@@ -59,7 +60,6 @@ export interface Context<E, R> {
 		};
 	};
 	attemptStartTime: number;
-	accumulatedTransitionTime: number;
 }
 
 type RequiredContextKeys =
@@ -84,17 +84,27 @@ export enum QuizStates {
 	COMPLETED = 'completed'
 }
 
+enum TimerActorEvents {
+	STOP = 'stop',
+	PAUSE = 'pause',
+	RESUME = 'resume'
+}
+
 export enum Commands {
 	START = 'start',
 	SUBMIT_ANSWER = 'submit_answer',
 	REVIEW = 'review',
 	TICK = 'tick',
-	SKIP = 'skip'
+	SKIP = 'skip',
+	TIMEOUT = 'timeout',
+	CONFIRM_SKIP = 'confirm_skip',
+	REJECT_SKIP = 'reject_skip'
 }
 
 export enum InProgressStages {
 	WAITING_FOR_ANSWER = 'waiting_for_answer',
-	GRADING = 'grading'
+	GRADING = 'grading',
+	SKIPPING = 'skipping'
 }
 
 // export const
@@ -131,8 +141,7 @@ export const createQuizMachine = <E, R>(
 			[QuizStates.REVIEWING]: {
 				timeSpentSeconds: 0
 			}
-		},
-		accumulatedTransitionTime: 0
+		}
 	});
 
 	const getInProgressStageSummary = (context: Context<E, R>) => {
@@ -170,10 +179,10 @@ export const createQuizMachine = <E, R>(
 		};
 	};
 
-	return setup({
+	const machine = setup({
 		types: {
 			context: {} as Context<E, R>,
-			events: {} as { type: Commands; response?: R; question?: E }
+			events: {} as { type: Commands; response?: R; question?: E; remaining?: number }
 		},
 		delays: {
 			delayBetweenAttempts
@@ -208,8 +217,7 @@ export const createQuizMachine = <E, R>(
 				};
 
 				context.responseLoggerFn(question, response);
-				const updatedResponses = [...context.events, responseEvent];
-
+				const updatedResponses = context.events.concat(responseEvent);
 				return {
 					events: updatedResponses,
 					noOfAttempts
@@ -226,7 +234,7 @@ export const createQuizMachine = <E, R>(
 			markQuestionSkipped: assign(({ context, event }) => {
 				const timestamp = Date.now();
 				const timeSpent = Math.floor((timestamp - context.attemptStartTime) / 1000);
-				const events = [
+				const updatedEvents = [
 					...context.events,
 					{
 						type: AttemptEvents.SKIP,
@@ -236,7 +244,7 @@ export const createQuizMachine = <E, R>(
 					}
 				];
 				return {
-					events
+					events: updatedEvents
 				};
 			}),
 			setAttemptStartTime: assign({
@@ -267,7 +275,7 @@ export const createQuizMachine = <E, R>(
 					context.noOfAttempts + 1 > context.maxAttemptPerQuestion;
 
 				return {
-					numberOfAttempts: shouldIncrement ? 0 : context.noOfAttempts,
+					noOfAttempts: shouldIncrement ? 0 : context.noOfAttempts,
 					currentQuestionIdx: shouldIncrement
 						? context.currentQuestionIdx + 1
 						: context.currentQuestionIdx,
@@ -278,18 +286,40 @@ export const createQuizMachine = <E, R>(
 			})
 		},
 		actors: {
-			tickCallback: fromCallback(({ sendBack, receive }) => {
-				const interval = setInterval(() => {
-					sendBack({ type: Commands.TICK });
-				}, 1000);
+			tickCallback: fromCallback<EventObject, { durationSeconds: number }>(
+				({ sendBack, receive, input }) => {
+					let remaining = input.durationSeconds * 1000;
 
-				receive((event) => {
-					if (event.type === 'stop') {
-						clearInterval(interval);
-					}
-				});
-				return () => clearInterval(interval);
-			})
+					let start = Date.now();
+					let interval: ReturnType<typeof setInterval> | null = null;
+
+					const startTimer = () => {
+						interval = setInterval(() => {
+							const now = Date.now();
+							remaining -= now - start;
+							start = now;
+							sendBack({ type: Commands.TICK, remaining });
+							if (remaining <= 0) {
+								sendBack({ type: Commands.TIMEOUT });
+							}
+						}, 1000);
+					};
+
+					receive((event) => {
+						if (event.type === TimerActorEvents.PAUSE) {
+							interval && clearInterval(interval);
+						} else if (event.type === TimerActorEvents.RESUME) {
+							start = Date.now();
+							startTimer();
+						} else if (event.type === TimerActorEvents.STOP) {
+							interval && clearInterval(interval);
+						}
+					});
+
+					startTimer();
+					return () => interval && clearInterval(interval);
+				}
+			)
 		}
 	}).createMachine({
 		id: 'quizMachine',
@@ -311,35 +341,47 @@ export const createQuizMachine = <E, R>(
 					currentQuestion: ({ context }) => context.questions[context.currentQuestionIdx]
 				}),
 				invoke: {
-					id: 'tick',
-					src: 'tickCallback'
+					id: 'attemptTick',
+					src: 'tickCallback',
+					input: {
+						durationSeconds: initialContext.attemptDuration
+					}
 				},
 				initial: InProgressStages.WAITING_FOR_ANSWER,
 				states: {
 					[InProgressStages.WAITING_FOR_ANSWER]: {
-						entry: [
-							'setAttemptStartTime',
-							assign({
-								accumulatedTransitionTime: () => 0
-							})
-						],
+						entry: ['setAttemptStartTime'],
 						on: {
 							[Commands.SUBMIT_ANSWER]: {
 								target: InProgressStages.GRADING
 							},
-							[Commands.SKIP]: [
+							[Commands.SKIP]: {
+								target: InProgressStages.SKIPPING
+							}
+						}
+					},
+					[InProgressStages.SKIPPING]: {
+						entry: [sendTo('attemptTick', { type: TimerActorEvents.PAUSE })],
+						exit: [sendTo('attemptTick', { type: TimerActorEvents.RESUME })],
+						on: {
+							[Commands.CONFIRM_SKIP]: [
 								{
 									guard: 'questionsExhausted',
 									target: `#quizMachine.${QuizStates.REVIEWING}`
 								},
 								{
-									actions: ['incrementQuestion', 'markQuestionSkipped']
+									actions: ['incrementQuestion', 'markQuestionSkipped'],
+									target: InProgressStages.WAITING_FOR_ANSWER
 								}
-							]
+							],
+							[Commands.REJECT_SKIP]: {
+								target: InProgressStages.WAITING_FOR_ANSWER
+							}
 						}
 					},
 					[InProgressStages.GRADING]: {
-						entry: 'evaluateResponse',
+						entry: [sendTo('attemptTick', { type: TimerActorEvents.PAUSE }), 'evaluateResponse'],
+						exit: [sendTo('attemptTick', { type: TimerActorEvents.RESUME })],
 						always: [
 							{
 								guard: 'questionsExhausted',
@@ -349,13 +391,7 @@ export const createQuizMachine = <E, R>(
 						after: {
 							delayBetweenAttempts: {
 								target: InProgressStages.WAITING_FOR_ANSWER,
-								actions: [
-									assign({
-										accumulatedTransitionTime: ({ context }) =>
-											context.accumulatedTransitionTime + delayBetweenAttempts
-									}),
-									'conditionalGoToNextQuestion'
-								]
+								actions: ['conditionalGoToNextQuestion']
 							}
 						}
 					}
@@ -363,30 +399,31 @@ export const createQuizMachine = <E, R>(
 				on: {
 					[Commands.TICK]: [
 						{
-							guard: {
-								type: 'timeoutExceeded',
-								params: { durationKey: 'attemptDuration' }
-							},
-							target: QuizStates.REVIEWING
-						},
-						{
 							actions: assign({
-								timeLeft: ({ context }) => {
-									const elapsed = Math.floor(
-										(Date.now() - context.stateStartTime - context.accumulatedTransitionTime) / 1000
-									);
-									return Math.max(0, context.attemptDuration - elapsed);
+								timeLeft: ({ context, event }) => {
+									const remaining = event.remaining!;
+									return Math.max(0, Math.floor(remaining / 1000));
 								}
 							})
 						}
-					]
+					],
+					[Commands.TIMEOUT]: {
+						target: QuizStates.REVIEWING
+					}
 				},
-				exit: [sendTo('tick', { type: 'stop' }), 'resetTimeLeft', 'summarizeAttemptStage']
+				exit: [
+					sendTo('attemptTick', { type: TimerActorEvents.STOP }),
+					'resetTimeLeft',
+					'summarizeAttemptStage'
+				]
 			},
 			[QuizStates.REVIEWING]: {
 				invoke: {
-					id: 'tick',
-					src: 'tickCallback'
+					id: 'reviewTick',
+					src: 'tickCallback',
+					input: {
+						durationSeconds: initialContext.reviewDuration
+					}
 				},
 				entry: assign({
 					stateStartTime: () => Date.now(),
@@ -395,27 +432,29 @@ export const createQuizMachine = <E, R>(
 				on: {
 					[Commands.TICK]: [
 						{
-							guard: {
-								type: 'timeoutExceeded',
-								params: { durationKey: 'attemptDuration' }
-							},
-							target: QuizStates.COMPLETED // return last?.correct || context.noOfAttempts + 1 >= context.maxAttemptPerQuestion;
-						},
-						{
 							actions: assign({
-								timeLeft: ({ context }) => {
-									const elapsed = Math.floor((Date.now() - context.stateStartTime) / 1000);
-									return Math.max(0, context.reviewDuration - elapsed);
+								timeLeft: ({ context, event }) => {
+									const remaining = event.remaining!;
+									return Math.max(0, Math.floor(remaining / 1000));
 								}
 							})
 						}
-					]
+					],
+					[Commands.TIMEOUT]: {
+						target: QuizStates.COMPLETED
+					}
 				},
-				exit: [sendTo('tick', { type: 'stop' }), 'resetTimeLeft', 'summarizeReviewStage']
+				exit: [
+					sendTo('reviewTick', { type: TimerActorEvents.STOP }),
+					'resetTimeLeft',
+					'summarizeReviewStage'
+				]
 			},
 			[QuizStates.COMPLETED]: {
 				type: 'final'
 			}
 		}
 	});
+
+	return machine;
 };

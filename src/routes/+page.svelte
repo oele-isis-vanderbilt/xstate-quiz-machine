@@ -5,13 +5,12 @@
 		Commands,
 		InProgressStages,
 		QuizStates,
-		type Context,
 		type QuizResponseEvent
 	} from '$lib/quizMachine';
-	import { Button, review } from 'flowbite-svelte';
-	import { useActor, useSelector } from '@xstate/svelte';
+	import { Button, Popover } from 'flowbite-svelte';
+	import { useActor } from '@xstate/svelte';
 	import type { SimpleQuestion } from '$lib/types';
-	import type { MachineSnapshot, SnapshotFrom } from 'xstate';
+	import type { SnapshotFrom } from 'xstate';
 	import { Confetti } from 'svelte-confetti';
 
 	const logger = {
@@ -93,7 +92,7 @@
 	};
 	const quizMachine = createQuizMachine<SimpleQuestion, string>(
 		{
-			attemptDuration: 300,
+			attemptDuration: 200,
 			reviewDuration: 60,
 			maxAttemptPerQuestion: 3,
 			questions: questions,
@@ -112,7 +111,7 @@
 				};
 			}
 		},
-		300
+		500
 	);
 
 	const { snapshot, send, actorRef } = useActor(quizMachine);
@@ -178,6 +177,10 @@
 		return $snapshot.matches({ [QuizStates.IN_PROGRESS]: InProgressStages.GRADING });
 	}
 
+	function isSkipping(): boolean {
+		return $snapshot.matches({ [QuizStates.IN_PROGRESS]: InProgressStages.SKIPPING });
+	}
+
 	function isCorrectSelection(option: string): boolean {
 		return !!(
 			isGrading() &&
@@ -185,6 +188,14 @@
 			$snapshot.context.currentQuestion.answer === option
 		);
 	}
+
+	let isPopOverOpen = $state(false);
+
+	$effect(() => {
+		if (isSkipping() && isPopOverOpen === false) {
+			isPopOverOpen = true;
+		}
+	});
 </script>
 
 <div class="mx-auto flex w-full flex-row gap-2 p-5">
@@ -220,7 +231,7 @@
 							outline={isOptionSelected(option) ? false : true}
 							color={isOptionSelected(option) && !isCorrectSelection(option) ? 'red' : 'green'}
 							class={['w-full']}
-							disabled={isGrading() || isOptionSelected(option)}
+							disabled={isGrading() || isSkipping() || isOptionSelected(option)}
 							onclick={() => {
 								selectedOptions = [...selectedOptions, option];
 								send({
@@ -239,7 +250,9 @@
 				</div>
 				<div class="mt-4">
 					<Button
+						disabled={isSkipping() || isGrading()}
 						color="blue"
+						id="skip-button"
 						class="w-full"
 						onclick={() =>
 							send({
@@ -248,6 +261,34 @@
 					>
 						Skip to Next Question
 					</Button>
+					<Popover
+						triggeredBy="#skip-button"
+						trigger="click"
+						title="Skip to the Next Question"
+						placement="top"
+						bind:isOpen={isPopOverOpen}
+					>
+						<div class="ms-3 text-sm font-normal">
+							<Button
+								size="xs"
+								onclick={() => {
+									send({
+										type: Commands.CONFIRM_SKIP
+									});
+									isPopOverOpen = false;
+								}}>Yes</Button
+							>
+							<Button
+								size="xs"
+								onclick={() => {
+									send({
+										type: Commands.REJECT_SKIP
+									});
+									isPopOverOpen = false;
+								}}>No</Button
+							>
+						</div>
+					</Popover>
 				</div>
 			</div>
 		{/if}
@@ -264,7 +305,7 @@
 			{#if $snapshot.matches(QuizStates.IN_PROGRESS)}
 				{timerText}
 			{:else if $snapshot.matches(QuizStates.REVIEWING)}
-				Reviewing...
+				{timerText}
 			{:else if $snapshot.matches(QuizStates.COMPLETED)}
 				Quiz Completed!
 			{:else}
@@ -284,7 +325,7 @@
 	<div class="flex max-h-96 w-1/2 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
 		<h1 class="mb-4 text-3xl font-bold">Responses</h1>
 		<div class="flex-1 overflow-y-auto">
-			{#each $snapshot.context.events.sort((a, b) => b.timestamp - a.timestamp) as event, _}
+			{#each $snapshot.context.events.toSorted((a, b) => b.timestamp - a.timestamp) as event, _}
 				<div class="w-full rounded-lg p-4 shadow-sm">
 					<pre
 						class={[
