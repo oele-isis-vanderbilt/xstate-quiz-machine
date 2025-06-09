@@ -101,7 +101,6 @@ describe('quiz machine', () => {
 					[QuizStates.IN_PROGRESS]: InProgressStages.WAITING_FOR_ANSWER
 				})
 			).toBe(true);
-			// Even after a second delay in transition, the time left should account for the delay
 			expect(afterGradingSnapshot.context.timeLeft).to.be.toBeGreaterThanOrEqual(59);
 		});
 
@@ -181,6 +180,65 @@ describe('quiz machine', () => {
 			const snapshot = actor.getSnapshot();
 			expect(snapshot.matches(QuizStates.REVIEWING)).toBe(true);
 			expect(snapshot.context.currentQuestionIdx).toBe(2); // Should be at the end of the questions
+		});
+
+		it('should only allow a predefined number of attempts per question', async () => {
+			const context = {
+				...initialContext,
+				maxAttemptPerQuestion: 2
+			};
+			const quizMachine = createQuizMachine(context, 1000);
+			const actor = createActor(quizMachine);
+			actor.start();
+			actor.send({ type: Commands.START });
+			actor.send({
+				type: Commands.SUBMIT_ANSWER,
+				response: '5'
+			});
+			await simulatedDelay(1200); // Simulate time passing for grading
+			let snapshot = actor.getSnapshot();
+			expect(
+				snapshot.matches({
+					[QuizStates.IN_PROGRESS]: InProgressStages.WAITING_FOR_ANSWER
+				})
+			).toBe(true);
+			expect(snapshot.context.noOfAttempts).toBe(1);
+			expect(snapshot.context.currentQuestionIdx).toBe(0); // Still on the first question
+
+			actor.send({
+				type: Commands.SUBMIT_ANSWER,
+				response: '6'
+			});
+			snapshot = actor.getSnapshot();
+			expect(snapshot.context.noOfAttempts).toBe(2);
+			await simulatedDelay(1200); // Simulate time passing for grading
+			snapshot = actor.getSnapshot();
+			expect(snapshot.context.currentQuestionIdx).toBe(1); // Still on the first question
+			expect(
+				snapshot.matches({
+					[QuizStates.IN_PROGRESS]: InProgressStages.WAITING_FOR_ANSWER
+				})
+			).toBe(true);
+		});
+
+		it('should pause the timer when in grading stage', async () => {
+			const quizMachine = createQuizMachine(initialContext, 1500);
+			const actor = createActor(quizMachine);
+			actor.start();
+			actor.send({ type: Commands.START });
+			const initialTimeLeft = actor.getSnapshot().context.timeLeft;
+			actor.send({
+				type: Commands.SUBMIT_ANSWER,
+				response: '5'
+			});
+			await simulatedDelay(1000);
+			const snapshot = actor.getSnapshot();
+			expect(
+				snapshot.matches({
+					[QuizStates.IN_PROGRESS]: InProgressStages.GRADING
+				})
+			).toBe(true);
+			expect(snapshot.context.timeLeft).toBe(initialTimeLeft); // Time should not decrease during grading
 		});
 
 		it('should handle record responses correctly', async () => {

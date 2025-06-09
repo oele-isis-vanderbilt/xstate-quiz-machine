@@ -220,7 +220,7 @@ export const createQuizMachine = <E, R>(
 				const updatedResponses = context.events.concat(responseEvent);
 				return {
 					events: updatedResponses,
-					noOfAttempts
+					noOfAttempts: noOfAttempts
 				};
 			}),
 			incrementQuestion: assign({
