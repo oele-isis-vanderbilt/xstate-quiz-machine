@@ -114,7 +114,7 @@
 		500
 	);
 
-	const { snapshot, send, actorRef } = useActor(quizMachine);
+	const { snapshot, send } = useActor(quizMachine);
 
 	function contextJSON(stateSnapshot: SnapshotFrom<typeof quizMachine>): string {
 		return JSON.stringify(
@@ -226,7 +226,7 @@
 					<p class="mt-2">{$snapshot.context.currentQuestion.question}</p>
 				</div>
 				<div class="mt-4 grid grid-cols-2 gap-2">
-					{#each $snapshot.context.currentQuestion.options as option}
+					{#each $snapshot.context.currentQuestion.options as option, index (index)}
 						<Button
 							outline={isOptionSelected(option) ? false : true}
 							color={isOptionSelected(option) && !isCorrectSelection(option) ? 'red' : 'green'}
@@ -325,7 +325,7 @@
 	<div class="flex max-h-96 w-1/2 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
 		<h1 class="mb-4 text-3xl font-bold">Responses</h1>
 		<div class="flex-1 overflow-y-auto">
-			{#each $snapshot.context.events.toSorted((a, b) => b.timestamp - a.timestamp) as event, _}
+			{#each $snapshot.context.events.toSorted((a, b) => b.timestamp - a.timestamp) as event, index (index)}
 				<div class="w-full rounded-lg p-4 shadow-sm">
 					<pre
 						class={[

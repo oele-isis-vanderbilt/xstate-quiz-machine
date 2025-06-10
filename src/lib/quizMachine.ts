@@ -72,10 +72,10 @@ type RequiredContextKeys =
 	| 'reviewDuration'
 	| 'maxAttemptPerQuestion';
 
-type OptionalContextKeys = Exclude<keyof Context<any, any>, RequiredContextKeys>;
+type OptionalContextKeys<E, R> = Exclude<keyof Context<E, R>, RequiredContextKeys>;
 
 export type InitialContext<E, R> = Pick<Context<E, R>, RequiredContextKeys> &
-	Partial<Pick<Context<E, R>, OptionalContextKeys>>;
+	Partial<Pick<Context<E, R>, OptionalContextKeys<E, R>>>;
 
 export enum QuizStates {
 	STARTING = 'starting',
@@ -226,10 +226,10 @@ export const createQuizMachine = <E, R>(
 			incrementQuestion: assign({
 				currentQuestionIdx: ({ context }) => context.currentQuestionIdx + 1,
 				currentQuestion: ({ context }) => context.questions[context.currentQuestionIdx + 1],
-				noOfAttempts: ({ context }) => 0
+				noOfAttempts: () => 0
 			}),
 			resetTimeLeft: assign({
-				timeLeft: ({ context }) => 0
+				timeLeft: () => 0
 			}),
 			markQuestionSkipped: assign(({ context, event }) => {
 				const timestamp = Date.now();
@@ -307,12 +307,16 @@ export const createQuizMachine = <E, R>(
 
 					receive((event) => {
 						if (event.type === TimerActorEvents.PAUSE) {
-							interval && clearInterval(interval);
+							if (interval) {
+								clearInterval(interval);
+							}
 						} else if (event.type === TimerActorEvents.RESUME) {
 							start = Date.now();
 							startTimer();
 						} else if (event.type === TimerActorEvents.STOP) {
-							interval && clearInterval(interval);
+							if (interval) {
+								clearInterval(interval);
+							}
 						}
 					});
 
@@ -370,7 +374,7 @@ export const createQuizMachine = <E, R>(
 									target: `#quizMachine.${QuizStates.REVIEWING}`
 								},
 								{
-									actions: ['incrementQuestion', 'markQuestionSkipped'],
+									actions: ['markQuestionSkipped', 'incrementQuestion'],
 									target: InProgressStages.WAITING_FOR_ANSWER
 								}
 							],
@@ -400,7 +404,7 @@ export const createQuizMachine = <E, R>(
 					[Commands.TICK]: [
 						{
 							actions: assign({
-								timeLeft: ({ context, event }) => {
+								timeLeft: ({ event }) => {
 									const remaining = event.remaining!;
 									return Math.max(0, Math.floor(remaining / 1000));
 								}
@@ -433,7 +437,7 @@ export const createQuizMachine = <E, R>(
 					[Commands.TICK]: [
 						{
 							actions: assign({
-								timeLeft: ({ context, event }) => {
+								timeLeft: ({ event }) => {
 									const remaining = event.remaining!;
 									return Math.max(0, Math.floor(remaining / 1000));
 								}

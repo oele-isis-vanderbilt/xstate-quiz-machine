@@ -8,7 +8,7 @@ import {
 } from './quizMachine';
 import type { InitialContext } from './quizMachine';
 import { createActor } from 'xstate';
-let simpleQuestions = [
+const simpleQuestions = [
 	{ id: '1', text: 'What is 2 + 2?', answer: '4' },
 	{ id: '2', text: 'What is the capital of France?', answer: 'Paris' },
 	{ id: '3', text: 'What is the largest planet in our solar system?', answer: 'Jupiter' }
@@ -239,6 +239,25 @@ describe('quiz machine', () => {
 				})
 			).toBe(true);
 			expect(snapshot.context.timeLeft).toBe(initialTimeLeft); // Time should not decrease during grading
+		});
+
+		it('should mark skip events correctly', async () => {
+			const quizMachine = createQuizMachine(initialContext);
+			const actor = createActor(quizMachine);
+			actor.start();
+			actor.send({ type: Commands.START });
+			actor.send({
+				type: Commands.SKIP
+			});
+			actor.send({
+				type: Commands.CONFIRM_SKIP
+			});
+			const snapshot = actor.getSnapshot();
+			expect(snapshot.context.events.length).toBe(1);
+			expect(snapshot.context.events[0].type).toBe(AttemptEvents.SKIP);
+			expect(snapshot.context.events[0].question.id).toBe('1'); // The first question
+			expect(snapshot.context.currentQuestionIdx).toBe(1); // Should move to the next question
+			expect(snapshot.context.currentQuestion.text).toBe('What is the capital of France?');
 		});
 
 		it('should handle record responses correctly', async () => {
