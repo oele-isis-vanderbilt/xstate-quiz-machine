@@ -295,5 +295,148 @@ describe('quiz machine', () => {
 			expect(snapshot.context.currentQuestion.id).toBe('1'); // The machine hasn't transitioned to the next question yet
 			expect(snapshot.context.noOfAttempts).toBe(1);
 		});
+
+		it('should not go to reviewing stage if the last question is incorrect at the first attempt', async () => {
+			const context: InitialContext<
+				{
+					id: string;
+					text: string;
+					answer: string;
+				},
+				string
+			> = {
+				...initialContext,
+				maxAttemptPerQuestion: 2,
+				responseLoggerFn: vi.fn(),
+				graderFn: (question, response) => {
+					return {
+						correct: question.answer === response,
+						payload: response
+					};
+				}
+			};
+			const quizMachine = createQuizMachine(context);
+
+			const actor = createActor(quizMachine);
+			actor.start();
+			// Skip the first two questions
+			actor.send({ type: Commands.START });
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			// Now we are on the last question
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Saturn' });
+			await simulatedDelay(1000); // Simulate time passing for grading
+			const snapshot = actor.getSnapshot();
+			expect(snapshot.matches(QuizStates.IN_PROGRESS)).toBe(true);
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Pluto' });
+			await simulatedDelay(1000); // Simulate time passing for grading
+			const afterSecondAttemptSnapshot = actor.getSnapshot();
+			expect(afterSecondAttemptSnapshot.matches(QuizStates.REVIEWING)).toBe(true);
+		});
+
+		it('should go to reviewing stage if the last question is incorrect after second attempt', async () => {
+			const context: InitialContext<
+				{
+					id: string;
+					text: string;
+					answer: string;
+				},
+				string
+			> = {
+				...initialContext,
+				maxAttemptPerQuestion: 2,
+				responseLoggerFn: vi.fn(),
+				graderFn: (question, response) => {
+					return {
+						correct: question.answer === response,
+						payload: response
+					};
+				}
+			};
+			const quizMachine = createQuizMachine(context);
+
+			const actor = createActor(quizMachine);
+			actor.start();
+			actor.send({ type: Commands.START });
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Jupiter' });
+			await simulatedDelay(1000);
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Saturn' });
+			await simulatedDelay(1000); // Simulate time passing for grading
+			expect(actor.getSnapshot().matches(QuizStates.REVIEWING)).toBe(true);
+		});
+
+		it('should go to reviewing stage if the last question is correct after second attempt', async () => {
+			const context: InitialContext<
+				{
+					id: string;
+					text: string;
+					answer: string;
+				},
+				string
+			> = {
+				...initialContext,
+				maxAttemptPerQuestion: 2,
+				responseLoggerFn: vi.fn(),
+				graderFn: (question, response) => {
+					return {
+						correct: question.answer === response,
+						payload: response
+					};
+				}
+			};
+			const quizMachine = createQuizMachine(context);
+
+			const actor = createActor(quizMachine);
+			actor.start();
+			actor.send({ type: Commands.START });
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Saturn' });
+			await simulatedDelay(1000);
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Jupiter' });
+			await simulatedDelay(1000); // Simulate time passing for grading
+			expect(actor.getSnapshot().matches(QuizStates.REVIEWING)).toBe(true);
+		});
+
+		it('should go to review stage if the last question is skipped', async () => {
+			const context: InitialContext<
+				{
+					id: string;
+					text: string;
+					answer: string;
+				},
+				string
+			> = {
+				...initialContext,
+				maxAttemptPerQuestion: 2,
+				responseLoggerFn: vi.fn(),
+				graderFn: (question, response) => {
+					return {
+						correct: question.answer === response,
+						payload: response
+					};
+				}
+			};
+			const quizMachine = createQuizMachine(context);
+
+			const actor = createActor(quizMachine);
+			actor.start();
+			actor.send({ type: Commands.START });
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			expect(actor.getSnapshot().matches(QuizStates.REVIEWING)).toBe(true);
+		});
 	});
 });
