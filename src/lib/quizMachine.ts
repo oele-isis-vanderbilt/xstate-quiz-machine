@@ -196,7 +196,20 @@ export const createQuizMachine = <E, R>(
 				return elapsed >= context[params.durationKey];
 			},
 			questionsExhausted: ({ context }) => {
-				return context.currentQuestionIdx + 1 >= context.questions.length;
+				const isLastQuestion = context.currentQuestionIdx + 1 == context.questions.length;
+
+				if (isLastQuestion) {
+					const lastEvent = context.events.at(-1);
+					const isLastResponseInCorrect =
+						lastEvent?.type === AttemptEvents.RESPONSE && !lastEvent.response?.correct;
+					if (isLastResponseInCorrect && context.noOfAttempts < context.maxAttemptPerQuestion) {
+						return false;
+					} else {
+						return true;
+					}
+				} else {
+					return context.currentQuestionIdx + 1 >= context.questions.length;
+				}
 			}
 		},
 		actions: {
