@@ -98,7 +98,8 @@ export enum Commands {
 	SKIP = 'skip',
 	TIMEOUT = 'timeout',
 	CONFIRM_SKIP = 'confirm_skip',
-	REJECT_SKIP = 'reject_skip'
+	REJECT_SKIP = 'reject_skip',
+	COMPLETE_REVIEW = 'complete_review'
 }
 
 export enum InProgressStages {
@@ -458,6 +459,9 @@ export const createQuizMachine = <E, R>(
 						}
 					],
 					[Commands.TIMEOUT]: {
+						target: QuizStates.COMPLETED
+					},
+					[Commands.COMPLETE_REVIEW]: {
 						target: QuizStates.COMPLETED
 					}
 				},
