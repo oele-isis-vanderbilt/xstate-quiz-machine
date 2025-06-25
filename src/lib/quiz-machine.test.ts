@@ -76,6 +76,22 @@ describe('quiz machine', () => {
 		expect(actor.getSnapshot().value).toBe(QuizStates.COMPLETED);
 	}, 10000);
 
+	it('should go to `COMPLETED` state after completing reviewing', async () => {
+		const context = {
+			...initialContext,
+			attemptDuration: 3,
+			reviewDuration: 100
+		};
+		const quizMachine = createQuizMachine(context);
+		const actor = createActor(quizMachine);
+		actor.start();
+		actor.send({ type: Commands.START });
+		await simulatedDelay(1000 * 4); // Simulate time passing
+		expect(actor.getSnapshot().value).toBe(QuizStates.REVIEWING);
+		actor.send({ type: Commands.COMPLETE_REVIEW});
+		expect(actor.getSnapshot().value).toBe(QuizStates.COMPLETED);
+	}, 5000);
+
 	describe('in-progress', () => {
 		const quizMachine = createQuizMachine(initialContext);
 
