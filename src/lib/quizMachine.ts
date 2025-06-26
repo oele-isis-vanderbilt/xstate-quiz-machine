@@ -211,6 +211,9 @@ export const createQuizMachine = <E, R>(
 				} else {
 					return context.currentQuestionIdx + 1 >= context.questions.length;
 				}
+			},
+			wasLastQuestionSkipped: ({ context }) => {
+				return context.currentQuestionIdx + 1 === context.questions.length;
 			}
 		},
 		actions: {
@@ -384,7 +387,8 @@ export const createQuizMachine = <E, R>(
 						on: {
 							[Commands.CONFIRM_SKIP]: [
 								{
-									guard: 'questionsExhausted',
+									guard: 'wasLastQuestionSkipped',
+									actions: ['markQuestionSkipped'],
 									target: `#quizMachine.${QuizStates.REVIEWING}`
 								},
 								{

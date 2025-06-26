@@ -88,7 +88,7 @@ describe('quiz machine', () => {
 		actor.send({ type: Commands.START });
 		await simulatedDelay(1000 * 4); // Simulate time passing
 		expect(actor.getSnapshot().value).toBe(QuizStates.REVIEWING);
-		actor.send({ type: Commands.COMPLETE_REVIEW});
+		actor.send({ type: Commands.COMPLETE_REVIEW });
 		expect(actor.getSnapshot().value).toBe(QuizStates.COMPLETED);
 	}, 5000);
 
