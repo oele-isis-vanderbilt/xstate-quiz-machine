@@ -92,6 +92,22 @@ describe('quiz machine', () => {
 		expect(actor.getSnapshot().value).toBe(QuizStates.COMPLETED);
 	}, 5000);
 
+	it('should transition to `REVIEWING` state when `GOTO_REVIEW` command is sent', () => {
+		const quizMachine = createQuizMachine(initialContext);
+		const actor = createActor(quizMachine);
+		actor.start();
+		actor.send({ type: Commands.GOTO_REVIEW });
+		expect(actor.getSnapshot().value).toBe(QuizStates.REVIEWING);
+	});
+
+	it('should transition to `COMPLETED` state when `COMPLETE_ASSESSMENT` command is sent', () => {
+		const quizMachine = createQuizMachine(initialContext);
+		const actor = createActor(quizMachine);
+		actor.start();
+		actor.send({ type: Commands.COMPLETE_ASSESSMENT });
+		expect(actor.getSnapshot().value).toBe(QuizStates.COMPLETED);
+	});
+
 	describe('in-progress', () => {
 		const quizMachine = createQuizMachine(initialContext);
 
