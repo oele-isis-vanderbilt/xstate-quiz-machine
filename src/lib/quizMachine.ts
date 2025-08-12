@@ -99,7 +99,9 @@ export enum Commands {
 	TIMEOUT = 'timeout',
 	CONFIRM_SKIP = 'confirm_skip',
 	REJECT_SKIP = 'reject_skip',
-	COMPLETE_REVIEW = 'complete_review'
+	COMPLETE_REVIEW = 'complete_review',
+	GOTO_REVIEW = 'goto_review',
+	COMPLETE_ASSESSMENT = 'complete_assessment'
 }
 
 export enum InProgressStages {
@@ -351,6 +353,12 @@ export const createQuizMachine = <E, R>(
 				on: {
 					[Commands.START]: {
 						target: QuizStates.IN_PROGRESS
+					},
+					[Commands.GOTO_REVIEW]: {
+						target: QuizStates.REVIEWING
+					},
+					[Commands.COMPLETE_ASSESSMENT]: {
+						target: QuizStates.COMPLETED
 					}
 				}
 			},
