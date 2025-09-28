@@ -1,12 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-	AttemptEvents,
-	Commands,
-	createQuizMachine,
-	InProgressStages,
-	QuizStates
-} from './quizMachine';
-import type { InitialContext } from './quizMachine';
+import { AttemptEvents, Commands, InProgressStages, QuizStates } from './quizMachine.types';
+import type { InitialContext } from './quizMachine.types';
+import { createQuizMachine } from './quizMachine';
 import { createActor } from 'xstate';
 const simpleQuestions = [
 	{ id: '1', text: 'What is 2 + 2?', answer: '4' },
@@ -40,7 +35,12 @@ describe('quiz machine', () => {
 			warn: vi.fn(),
 			error: vi.fn()
 		},
-		graderFn: vi.fn(),
+		graderFn: (question, response) => {
+			return {
+				correct: question.answer === response,
+				payload: response
+			};
+		},
 		maxAttemptPerQuestion: 2,
 		reviewDuration: 30,
 		noOfAttempts: 0,
@@ -197,7 +197,7 @@ describe('quiz machine', () => {
 			).toBe(true);
 		});
 
-		it('shoud go to `REVIEWING` stage after all questions are skipped', async () => {
+		it('should cycle through skipped questions after all questions are skipped', async () => {
 			const actor = createActor(quizMachine);
 			actor.start();
 			actor.send({ type: Commands.START });
@@ -210,8 +210,8 @@ describe('quiz machine', () => {
 				});
 			}
 			const snapshot = actor.getSnapshot();
-			expect(snapshot.matches(QuizStates.REVIEWING)).toBe(true);
-			expect(snapshot.context.currentQuestionIdx).toBe(2); // Should be at the end of the questions
+			expect(snapshot.matches(QuizStates.REVIEWING)).toBe(false);
+			expect(snapshot.context.currentQuestionIdx).toBe(0); // Should be at the end of the questions
 		});
 
 		it('should only allow a predefined number of attempts per question', async () => {
@@ -351,12 +351,13 @@ describe('quiz machine', () => {
 
 			const actor = createActor(quizMachine);
 			actor.start();
-			// Skip the first two questions
 			actor.send({ type: Commands.START });
-			actor.send({ type: Commands.SKIP });
-			actor.send({ type: Commands.CONFIRM_SKIP });
-			actor.send({ type: Commands.SKIP });
-			actor.send({ type: Commands.CONFIRM_SKIP });
+			// Answer the first two questions correctly
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: '4' });
+			await simulatedDelay(1000);
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Paris' });
+			await simulatedDelay(1000);
+
 			// Now we are on the last question
 			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Saturn' });
 			await simulatedDelay(1000); // Simulate time passing for grading
@@ -368,7 +369,7 @@ describe('quiz machine', () => {
 			expect(afterSecondAttemptSnapshot.matches(QuizStates.REVIEWING)).toBe(true);
 		});
 
-		it('should go to reviewing stage if the last question is incorrect after second attempt', async () => {
+		it('should go to reviewing stage if the last question is incorrect after second attempt and no questions are skipped', async () => {
 			const context: InitialContext<
 				{
 					id: string;
@@ -392,10 +393,12 @@ describe('quiz machine', () => {
 			const actor = createActor(quizMachine);
 			actor.start();
 			actor.send({ type: Commands.START });
-			actor.send({ type: Commands.SKIP });
-			actor.send({ type: Commands.CONFIRM_SKIP });
-			actor.send({ type: Commands.SKIP });
-			actor.send({ type: Commands.CONFIRM_SKIP });
+			// Answer the first two questions correctly
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: '4' });
+			await simulatedDelay(1000);
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Paris' });
+			await simulatedDelay(1000);
+			// Now we are on the last question
 			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Jupiter' });
 			await simulatedDelay(1000);
 			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Saturn' });
@@ -403,7 +406,7 @@ describe('quiz machine', () => {
 			expect(actor.getSnapshot().matches(QuizStates.REVIEWING)).toBe(true);
 		});
 
-		it('should go to reviewing stage if the last question is correct after second attempt', async () => {
+		it('should go to reviewing stage if the last question is correct after second attempt and we force review stage', async () => {
 			const context: InitialContext<
 				{
 					id: string;
@@ -435,10 +438,14 @@ describe('quiz machine', () => {
 			await simulatedDelay(1000);
 			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Jupiter' });
 			await simulatedDelay(1000); // Simulate time passing for grading
+
+			expect(actor.getSnapshot().context.currentQuestionIdx).toBe(0);
+			expect(actor.getSnapshot().matches(QuizStates.IN_PROGRESS)).toBe(true);
+			actor.send({ type: Commands.FORCE_REVIEW });
 			expect(actor.getSnapshot().matches(QuizStates.REVIEWING)).toBe(true);
 		});
 
-		it('should go to review stage if the last question is skipped', async () => {
+		it('should go to review stage if the last question is skipped and we force review', async () => {
 			const context: InitialContext<
 				{
 					id: string;
@@ -468,6 +475,7 @@ describe('quiz machine', () => {
 			actor.send({ type: Commands.CONFIRM_SKIP });
 			actor.send({ type: Commands.SKIP });
 			actor.send({ type: Commands.CONFIRM_SKIP });
+			actor.send({ type: Commands.FORCE_REVIEW });
 			expect(actor.getSnapshot().matches(QuizStates.REVIEWING)).toBe(true);
 		});
 	});

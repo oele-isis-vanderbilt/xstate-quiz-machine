@@ -1,116 +1,25 @@
 import { assign, fromCallback, sendTo, setup } from 'xstate';
 import type { EventObject } from 'xstate';
+import type { InitialContext, Context, QuizResponseEvent } from './quizMachine.types';
+import {
+	AttemptEvents,
+	Commands,
+	InProgressStages,
+	QuizStates,
+	TimerActorEvents
+} from './quizMachine.types';
 
-export enum AttemptEvents {
-	RESPONSE = 'response',
-	SKIP = 'skip'
-}
-
-export interface AttemptResponse<R> {
-	correct: boolean;
-	payload?: R;
-	attemptNumber?: number;
-}
-
-export type QuizResponseEvent<E, R> = {
-	type: AttemptEvents;
-	timestamp: number;
-	question: E;
-	timeSpentSeconds?: number;
-	response?: AttemptResponse<R>;
+const findNumberofAttemptsForQuestion = <E, R>(
+	events: QuizResponseEvent<E, R>[],
+	questionId: string,
+	questionIdentifierFn: (question: E) => string
+): number => {
+	const questionAttempts = events.filter(
+		(event) =>
+			event.type === AttemptEvents.RESPONSE && questionIdentifierFn(event.question) === questionId
+	);
+	return questionAttempts.length;
 };
-
-export interface Context<E, R> {
-	currentQuestion: E;
-	maxAttemptPerQuestion: number;
-	currentQuestionIdx: number;
-	attemptDuration: number;
-	reviewDuration: number;
-	timeLeft: number;
-	elapsedTime: number;
-	stateStartTime: number;
-	questions: E[];
-	noOfAttempts: number;
-	graderFn: (
-		question: E,
-		response: R
-	) => {
-		correct: boolean;
-		payload?: R;
-	};
-	questionIdentifierFn: (question: E) => string;
-	responseLoggerFn: (question: E, response: R) => void;
-	eventsLogger: {
-		info: (message: string) => void;
-		error: (message: string) => void;
-		debug: (message: string) => void;
-		warn: (message: string) => void;
-	};
-	events: QuizResponseEvent<E, R>[];
-	stageSummaries: {
-		[QuizStates.IN_PROGRESS]: {
-			questionsAttempted: number;
-			questionsSkipped: number;
-			questionsCorrect: number;
-			questionsIncorrect: number;
-			timeSpentSeconds: number;
-		};
-		[QuizStates.REVIEWING]: {
-			timeSpentSeconds: number;
-		};
-	};
-	attemptStartTime: number;
-}
-
-type RequiredContextKeys =
-	| 'questions'
-	| 'graderFn'
-	| 'questionIdentifierFn'
-	| 'responseLoggerFn'
-	| 'maxAttemptPerQuestion'
-	| 'attemptDuration'
-	| 'reviewDuration'
-	| 'maxAttemptPerQuestion';
-
-type OptionalContextKeys<E, R> = Exclude<keyof Context<E, R>, RequiredContextKeys>;
-
-export type InitialContext<E, R> = Pick<Context<E, R>, RequiredContextKeys> &
-	Partial<Pick<Context<E, R>, OptionalContextKeys<E, R>>>;
-
-export enum QuizStates {
-	STARTING = 'starting',
-	IN_PROGRESS = 'in-progress',
-	REVIEWING = 'reviewing',
-	COMPLETED = 'completed'
-}
-
-enum TimerActorEvents {
-	STOP = 'stop',
-	PAUSE = 'pause',
-	RESUME = 'resume'
-}
-
-export enum Commands {
-	START = 'start',
-	SUBMIT_ANSWER = 'submit_answer',
-	REVIEW = 'review',
-	TICK = 'tick',
-	SKIP = 'skip',
-	TIMEOUT = 'timeout',
-	CONFIRM_SKIP = 'confirm_skip',
-	REJECT_SKIP = 'reject_skip',
-	COMPLETE_REVIEW = 'complete_review',
-	GOTO_REVIEW = 'goto_review',
-	COMPLETE_ASSESSMENT = 'complete_assessment'
-}
-
-export enum InProgressStages {
-	WAITING_FOR_ANSWER = 'waiting_for_answer',
-	GRADING = 'grading',
-	SKIPPING = 'skipping'
-}
-
-// export const
 
 export const createQuizMachine = <E, R>(
 	initialContext: InitialContext<E, R>,
@@ -144,7 +53,12 @@ export const createQuizMachine = <E, R>(
 			[QuizStates.REVIEWING]: {
 				timeSpentSeconds: 0
 			}
-		}
+		},
+		skipedQuestions: ctx.skipedQuestions || new Map<string, E>(),
+		regularFlowQuestionIdx: ctx.regularFlowQuestionIdx || null,
+		regularFlowQuestion: ctx.regularFlowQuestion || null,
+		skippedMode: ctx.skippedMode || false,
+		regularFlowCompleted: ctx.regularFlowCompleted || false
 	});
 
 	const getInProgressStageSummary = (context: Context<E, R>) => {
@@ -185,7 +99,13 @@ export const createQuizMachine = <E, R>(
 	const machine = setup({
 		types: {
 			context: {} as Context<E, R>,
-			events: {} as { type: Commands; response?: R; question?: E; remaining?: number }
+			events: {} as {
+				type: Commands;
+				response?: R;
+				question?: E;
+				remaining?: number;
+				skippedQuestionId?: string;
+			}
 		},
 		delays: {
 			delayBetweenAttempts
@@ -199,23 +119,31 @@ export const createQuizMachine = <E, R>(
 				return elapsed >= context[params.durationKey];
 			},
 			questionsExhausted: ({ context }) => {
-				const isLastQuestion = context.currentQuestionIdx + 1 == context.questions.length;
+				const regularFlowCompleted = context.regularFlowCompleted;
+				const lastEvent = context.events.at(-1);
+				let moreRetriesPossible = false;
 
-				if (isLastQuestion) {
-					const lastEvent = context.events.at(-1);
-					const isLastResponseInCorrect =
-						lastEvent?.type === AttemptEvents.RESPONSE && !lastEvent.response?.correct;
-					if (isLastResponseInCorrect && context.noOfAttempts < context.maxAttemptPerQuestion) {
-						return false;
-					} else {
-						return true;
-					}
-				} else {
-					return context.currentQuestionIdx + 1 >= context.questions.length;
+				if (lastEvent?.type === AttemptEvents.RESPONSE) {
+					const wasCorrect = lastEvent.response?.correct;
+					moreRetriesPossible =
+						!wasCorrect && context.noOfAttempts + 1 < context.maxAttemptPerQuestion;
 				}
+
+				const isLastSkippedQuestionWithNoRetries =
+					context.skippedMode && context.skipedQuestions.size === 0 && !moreRetriesPossible;
+
+				const noSkippedQuestionsLeft = !context.skippedMode && context.skipedQuestions.size === 0;
+
+				return (
+					regularFlowCompleted && (noSkippedQuestionsLeft || isLastSkippedQuestionWithNoRetries)
+				);
 			},
-			wasLastQuestionSkipped: ({ context }) => {
-				return context.currentQuestionIdx + 1 === context.questions.length;
+			isValidSkippedQuestion: ({ context, event }) => {
+				const skippedQuestionId = event.skippedQuestionId!;
+				return context.skipedQuestions.has(skippedQuestionId);
+			},
+			regularFlowCompleted: ({ context }) => {
+				return context.regularFlowCompleted;
 			}
 		},
 		actions: {
@@ -226,7 +154,6 @@ export const createQuizMachine = <E, R>(
 				const question = event.question || context.currentQuestion;
 				const result = context.graderFn(question, response);
 				const noOfAttempts = context.noOfAttempts + 1;
-
 				const responseEvent: QuizResponseEvent<E, R> = {
 					type: AttemptEvents.RESPONSE,
 					timestamp: timestamp,
@@ -237,15 +164,102 @@ export const createQuizMachine = <E, R>(
 
 				context.responseLoggerFn(question, response);
 				const updatedResponses = context.events.concat(responseEvent);
+				let regularFlowCompeleted = context.regularFlowCompleted;
+				if (context.skippedMode) {
+					regularFlowCompeleted = context.regularFlowCompleted;
+				} else {
+					const wasLastQuestion = context.currentQuestionIdx + 1 === context.questions.length;
+					regularFlowCompeleted = result.correct
+						? wasLastQuestion
+						: wasLastQuestion && noOfAttempts >= context.maxAttemptPerQuestion;
+				}
 				return {
 					events: updatedResponses,
-					noOfAttempts: noOfAttempts
+					noOfAttempts: noOfAttempts,
+					regularFlowCompleted: regularFlowCompeleted
 				};
 			}),
-			incrementQuestion: assign({
-				currentQuestionIdx: ({ context }) => context.currentQuestionIdx + 1,
-				currentQuestion: ({ context }) => context.questions[context.currentQuestionIdx + 1],
-				noOfAttempts: () => 0
+			incrementQuestionAsSkipped: assign(({ context }) => {
+				if (context.skippedMode && !context.regularFlowCompleted) {
+					const lastRegularFlowQuestionIdx = context.regularFlowQuestionIdx!;
+					const lastRegularFlowQuestion = context.regularFlowQuestion!;
+					return {
+						skippedMode: false,
+						regularFlowQuestionIdx: null,
+						regularFlowQuestion: null,
+						currentQuestionIdx: lastRegularFlowQuestionIdx,
+						currentQuestion: lastRegularFlowQuestion,
+						noOfAttempts: 0
+					};
+				} else if (context.skippedMode && context.regularFlowCompleted) {
+					const skippedSize = context.skipedQuestions.size;
+					if (skippedSize === 0) {
+						return {
+							currentQuestionIdx: context.currentQuestionIdx,
+							currentQuestion: context.currentQuestion,
+							noOfAttempts: 0,
+							skippedMode: false,
+							regularFlowQuestionIdx: null,
+							regularFlowQuestion: null,
+							regularFlowCompleted: true
+						};
+					} else {
+						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value;
+						const questionToGo = context.skipedQuestions.get(firstSkippedQuestionId)!;
+						const skippedQuestionIdx = context.questions.findIndex(
+							(q) => context.questionIdentifierFn(q) === firstSkippedQuestionId
+						);
+						const newSkipedQuestions = new Map(context.skipedQuestions);
+						newSkipedQuestions.delete(firstSkippedQuestionId);
+						return {
+							currentQuestionIdx: skippedQuestionIdx,
+							currentQuestion: questionToGo,
+							noOfAttempts: findNumberofAttemptsForQuestion(
+								context.events,
+								firstSkippedQuestionId,
+								context.questionIdentifierFn
+							),
+							skipedQuestions: newSkipedQuestions,
+							skippedMode: true,
+							regularFlowQuestionIdx: null,
+							regularFlowQuestion: null,
+							regularFlowCompleted: true
+						};
+					}
+				} else {
+					const wasLastQuestion = context.currentQuestionIdx + 1 === context.questions.length;
+					if (wasLastQuestion) {
+						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value;
+						if (firstSkippedQuestionId) {
+							const questionToGo = context.skipedQuestions.get(firstSkippedQuestionId)!;
+							const skippedQuestionIdx = context.questions.findIndex(
+								(q) => context.questionIdentifierFn(q) === firstSkippedQuestionId
+							);
+							const newSkipedQuestions = new Map(context.skipedQuestions);
+							newSkipedQuestions.delete(firstSkippedQuestionId);
+							return {
+								skippedMode: true,
+								currentQuestionIdx: skippedQuestionIdx,
+								currentQuestion: questionToGo,
+								skipedQuestions: newSkipedQuestions,
+								noOfAttempts: findNumberofAttemptsForQuestion(
+									context.events,
+									firstSkippedQuestionId,
+									context.questionIdentifierFn
+								),
+								regularFlowQuestionIdx: null,
+								regularFlowQuestion: null,
+								regularFlowCompleted: true
+							};
+						}
+					} else {
+						return {
+							currentQuestionIdx: context.currentQuestionIdx + 1,
+							currentQuestion: context.questions[context.currentQuestionIdx + 1],
+							noOfAttempts: 0
+						};
+					}
+				}
 			}),
 			resetTimeLeft: assign({
 				timeLeft: () => 0
@@ -253,6 +267,9 @@ export const createQuizMachine = <E, R>(
 			markQuestionSkipped: assign(({ context, event }) => {
 				const timestamp = Date.now();
 				const timeSpent = Math.floor((timestamp - context.attemptStartTime) / 1000);
+				const newSkipedQuestions = new Map(context.skipedQuestions);
+				const questionToSkip = event.question || context.currentQuestion;
+				newSkipedQuestions.set(context.questionIdentifierFn(questionToSkip), questionToSkip);
 				const updatedEvents = [
 					...context.events,
 					{
@@ -263,6 +280,7 @@ export const createQuizMachine = <E, R>(
 					}
 				];
 				return {
+					skipedQuestions: newSkipedQuestions,
 					events: updatedEvents
 				};
 			}),
@@ -291,7 +309,97 @@ export const createQuizMachine = <E, R>(
 				const lastEvent = context.events.at(-1);
 				const shouldIncrement =
 					(lastEvent?.type === AttemptEvents.RESPONSE && lastEvent.response?.correct) ||
-					context.noOfAttempts + 1 > context.maxAttemptPerQuestion;
+					context.noOfAttempts >= context.maxAttemptPerQuestion;
+
+				if (context.skippedMode && !context.regularFlowCompleted) {
+					return {
+						skippedMode: false,
+						regularFlowQuestionIdx: null,
+						regularFlowQuestion: null,
+						currentQuestionIdx: shouldIncrement
+							? context.regularFlowQuestionIdx
+							: context.currentQuestionIdx,
+						currentQuestion: shouldIncrement
+							? context.regularFlowQuestion
+							: context.currentQuestion,
+						noOfAttempts: shouldIncrement ? 0 : context.noOfAttempts
+					};
+				} else if (context.skippedMode && context.regularFlowCompleted) {
+					const skippedSize = context.skipedQuestions.size;
+					if (skippedSize === 0) {
+						return {
+							currentQuestionIdx: context.currentQuestionIdx,
+							currentQuestion: context.currentQuestion,
+							noOfAttempts: shouldIncrement ? 0 : context.noOfAttempts,
+							skippedMode: false,
+							regularFlowQuestionIdx: null,
+							regularFlowQuestion: null,
+							regularFlowCompleted: true
+						};
+					} else if (shouldIncrement) {
+						// Move to next skipped question
+						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value;
+						const questionToGo = context.skipedQuestions.get(firstSkippedQuestionId)!;
+						const skippedQuestionIdx = context.questions.findIndex(
+							(q) => context.questionIdentifierFn(q) === firstSkippedQuestionId
+						);
+						const newSkipedQuestions = new Map(context.skipedQuestions);
+						newSkipedQuestions.delete(firstSkippedQuestionId);
+
+						return {
+							currentQuestionIdx: skippedQuestionIdx,
+							currentQuestion: questionToGo,
+							noOfAttempts: findNumberofAttemptsForQuestion(
+								context.events,
+								firstSkippedQuestionId,
+								context.questionIdentifierFn
+							),
+							skipedQuestions: newSkipedQuestions,
+							skippedMode: true,
+							regularFlowQuestionIdx: null,
+							regularFlowQuestion: null,
+							regularFlowCompleted: true
+						};
+					} else {
+						// Stay on current question
+						return {
+							currentQuestionIdx: context.currentQuestionIdx,
+							currentQuestion: context.currentQuestion,
+							noOfAttempts: context.noOfAttempts,
+							skipedQuestions: context.skipedQuestions,
+							skippedMode: true,
+							regularFlowQuestionIdx: null,
+							regularFlowQuestion: null,
+							regularFlowCompleted: true
+						};
+					}
+				}
+
+				const wasLastQuestion = context.currentQuestionIdx + 1 === context.questions.length;
+
+				if (wasLastQuestion && shouldIncrement && context.skipedQuestions.size > 0) {
+					const firstSkippedQuestionId = context.skipedQuestions.keys().next().value!;
+					const questionToGo = context.skipedQuestions.get(firstSkippedQuestionId);
+					const skippedQuestionIdx = context.questions.findIndex(
+						(q) => context.questionIdentifierFn(q) === firstSkippedQuestionId
+					);
+					const newSkipedQuestions = new Map(context.skipedQuestions);
+					newSkipedQuestions.delete(firstSkippedQuestionId);
+					return {
+						skippedMode: true,
+						currentQuestionIdx: skippedQuestionIdx,
+						currentQuestion: questionToGo,
+						skipedQuestions: newSkipedQuestions,
+						regularFlowQuestionIdx: null,
+						regularFlowQuestion: null,
+						noOfAttempts: findNumberofAttemptsForQuestion(
+							context.events,
+							firstSkippedQuestionId,
+							context.questionIdentifierFn
+						),
+						regularFlowCompleted: true
+					};
+				}
 
 				return {
 					noOfAttempts: shouldIncrement ? 0 : context.noOfAttempts,
@@ -300,7 +408,34 @@ export const createQuizMachine = <E, R>(
 						: context.currentQuestionIdx,
 					currentQuestion: shouldIncrement
 						? context.questions[context.currentQuestionIdx + 1]
-						: context.currentQuestion
+						: context.currentQuestion,
+					skippedMode: false,
+					regularFlowQuestionIdx: null,
+					regularFlowQuestion: null,
+					regularFlowCompleted: false
+				};
+			}),
+			goToSkippedQuestion: assign(({ context, event }) => {
+				const skippedQuestionId = event.skippedQuestionId!;
+				const questionToGo = context.skipedQuestions.get(skippedQuestionId)!;
+				const skippedQuestionIdx = context.questions.findIndex(
+					(q) => context.questionIdentifierFn(q) === skippedQuestionId
+				);
+				const newSkipedQuestions = new Map(context.skipedQuestions);
+				newSkipedQuestions.delete(skippedQuestionId);
+
+				return {
+					skippedMode: true,
+					skipedQuestions: newSkipedQuestions,
+					currentQuestion: questionToGo,
+					currentQuestionIdx: skippedQuestionIdx,
+					regularFlowQuestionIdx: context.currentQuestionIdx,
+					regularFlowQuestion: context.currentQuestion,
+					noOfAttempts: findNumberofAttemptsForQuestion(
+						context.events,
+						skippedQuestionId,
+						context.questionIdentifierFn
+					)
 				};
 			})
 		},
@@ -386,6 +521,15 @@ export const createQuizMachine = <E, R>(
 							},
 							[Commands.SKIP]: {
 								target: InProgressStages.SKIPPING
+							},
+							[Commands.GOTO_SKIPPED]: {
+								guard: 'isValidSkippedQuestion',
+								actions: ['goToSkippedQuestion'],
+								target: InProgressStages.WAITING_FOR_ANSWER
+							},
+							[Commands.FORCE_REVIEW]: {
+								guard: 'regularFlowCompleted',
+								target: `#quizMachine.${QuizStates.REVIEWING}`
 							}
 						}
 					},
@@ -395,12 +539,7 @@ export const createQuizMachine = <E, R>(
 						on: {
 							[Commands.CONFIRM_SKIP]: [
 								{
-									guard: 'wasLastQuestionSkipped',
-									actions: ['markQuestionSkipped'],
-									target: `#quizMachine.${QuizStates.REVIEWING}`
-								},
-								{
-									actions: ['markQuestionSkipped', 'incrementQuestion'],
+									actions: ['markQuestionSkipped', 'incrementQuestionAsSkipped'],
 									target: InProgressStages.WAITING_FOR_ANSWER
 								}
 							],

@@ -6,7 +6,7 @@
 		InProgressStages,
 		QuizStates,
 		type QuizResponseEvent
-	} from '$lib/quizMachine';
+	} from '$lib/quizMachine.types';
 	import { Button, Popover } from 'flowbite-svelte';
 	import { useActor } from '@xstate/svelte';
 	import type { SimpleQuestion } from '$lib/types';
@@ -125,7 +125,11 @@
 				reviewDuration: stateSnapshot.context.reviewDuration,
 				timeLeft: stateSnapshot.context.timeLeft,
 				maxAttemptPerQuestion: stateSnapshot.context.maxAttemptPerQuestion,
-				attemptCount: stateSnapshot.context.noOfAttempts
+				attemptCount: stateSnapshot.context.noOfAttempts,
+				skippedMode: stateSnapshot.context.skippedMode,
+				skipedQuestions: Array.from(stateSnapshot.context.skipedQuestions.keys()),
+				regularFlowIndex: stateSnapshot.context.regularFlowQuestionIdx,
+				regularFlowCompleted: stateSnapshot.context.regularFlowCompleted
 			},
 			null,
 			2
@@ -179,6 +183,10 @@
 
 	function isSkipping(): boolean {
 		return $snapshot.matches({ [QuizStates.IN_PROGRESS]: InProgressStages.SKIPPING });
+	}
+
+	function canForceReview(): boolean {
+		return $snapshot.context.regularFlowCompleted;
 	}
 
 	function isCorrectSelection(option: string): boolean {
@@ -290,6 +298,22 @@
 						</div>
 					</Popover>
 				</div>
+				{#if canForceReview()}
+					<div class="mt-2">
+						<Button
+							disabled={isSkipping() || isGrading()}
+							color="blue"
+							id="skip-button"
+							class="w-full"
+							onclick={() =>
+								send({
+									type: Commands.FORCE_REVIEW
+								})}
+						>
+							To Go Review
+						</Button>
+					</div>
+				{/if}
 			</div>
 		{/if}
 		{#if $snapshot.matches(QuizStates.REVIEWING)}
@@ -316,13 +340,13 @@
 </div>
 
 <div class="mx-auto flex h-1/2 w-full flex-row items-stretch gap-2 p-5">
-	<div class="w-1/2 rounded-lg bg-gray-100 p-4 shadow-sm">
+	<div class="w-1/3 rounded-lg bg-gray-100 p-4 shadow-sm">
 		<h1 class="mb-4 text-3xl font-bold">FSM</h1>
 		<pre class="overflow-x-auto rounded-md bg-white p-3 text-sm text-gray-800"><code
 				>{contextJSON($snapshot)}</code
 			></pre>
 	</div>
-	<div class="flex max-h-96 w-1/2 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
+	<div class="flex max-h-96 w-1/3 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
 		<h1 class="mb-4 text-3xl font-bold">Responses</h1>
 		<div class="flex-1 overflow-y-auto">
 			{#each $snapshot.context.events.toSorted((a, b) => b.timestamp - a.timestamp) as event, index (index)}
@@ -336,6 +360,42 @@
 						]}><code>{responseJSON(event)}</code></pre>
 				</div>
 			{/each}
+		</div>
+	</div>
+	<div class="flex max-h-96 w-1/3 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
+		<h1 class="mb-4 text-3xl font-bold">Skipped Problems</h1>
+		<div class="flex-1 overflow-y-auto">
+			{#if $snapshot.context.skipedQuestions.size === 0}
+				<div class="rounded-lg bg-white p-4 shadow-sm">
+					<p class="text-sm text-gray-500">No problems skipped yet</p>
+				</div>
+			{:else}
+				{#each Array.from($snapshot.context.skipedQuestions.entries()) as [questionId, question] (questionId)}
+					<div class="mb-2 rounded-lg bg-white p-4 shadow-sm">
+						<div class="mb-2">
+							<span class="text-xs font-semibold text-gray-600">ID: {questionId}</span>
+						</div>
+						<p class="text-sm font-medium text-gray-800">{question.question}</p>
+						<div class="mt-2 grid grid-cols-2 gap-1">
+							{#each question.options as option}
+								<div class="rounded border bg-gray-100 p-1 text-xs">
+									{option}
+								</div>
+							{/each}
+						</div>
+						<button
+							class="mt-2 text-sm text-blue-500 underline hover:text-blue-700"
+							onclick={() =>
+								send({
+									type: Commands.GOTO_SKIPPED,
+									skippedQuestionId: questionId
+								})}
+						>
+							Go to Problem
+						</button>
+					</div>
+				{/each}
+			{/if}
 		</div>
 	</div>
 </div>
