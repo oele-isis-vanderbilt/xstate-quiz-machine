@@ -179,6 +179,7 @@ export const createQuizMachine = <E, R>(
 					regularFlowCompleted: regularFlowCompeleted
 				};
 			}),
+			// @ts-ignore
 			incrementQuestionAsSkipped: assign(({ context }) => {
 				if (context.skippedMode && !context.regularFlowCompleted) {
 					const lastRegularFlowQuestionIdx = context.regularFlowQuestionIdx!;
@@ -204,7 +205,7 @@ export const createQuizMachine = <E, R>(
 							regularFlowCompleted: true
 						};
 					} else {
-						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value;
+						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value!;
 						const questionToGo = context.skipedQuestions.get(firstSkippedQuestionId)!;
 						const skippedQuestionIdx = context.questions.findIndex(
 							(q) => context.questionIdentifierFn(q) === firstSkippedQuestionId
@@ -305,6 +306,7 @@ export const createQuizMachine = <E, R>(
 					};
 				}
 			}),
+			// @ts-ignore
 			conditionalGoToNextQuestion: assign(({ context }) => {
 				const lastEvent = context.events.at(-1);
 				const shouldIncrement =
@@ -338,7 +340,7 @@ export const createQuizMachine = <E, R>(
 						};
 					} else if (shouldIncrement) {
 						// Move to next skipped question
-						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value;
+						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value!;
 						const questionToGo = context.skipedQuestions.get(firstSkippedQuestionId)!;
 						const skippedQuestionIdx = context.questions.findIndex(
 							(q) => context.questionIdentifierFn(q) === firstSkippedQuestionId
