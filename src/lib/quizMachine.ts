@@ -315,9 +315,9 @@ export const createQuizMachine = <E, R>(
 
 				if (context.skippedMode && !context.regularFlowCompleted) {
 					return {
-						skippedMode: false,
-						regularFlowQuestionIdx: null,
-						regularFlowQuestion: null,
+						skippedMode: shouldIncrement ? false : true,
+						regularFlowQuestionIdx: shouldIncrement ? null : context.regularFlowQuestionIdx,
+						regularFlowQuestion: shouldIncrement ? null : context.regularFlowQuestion,
 						currentQuestionIdx: shouldIncrement
 							? context.regularFlowQuestionIdx
 							: context.currentQuestionIdx,
@@ -333,7 +333,7 @@ export const createQuizMachine = <E, R>(
 							currentQuestionIdx: context.currentQuestionIdx,
 							currentQuestion: context.currentQuestion,
 							noOfAttempts: shouldIncrement ? 0 : context.noOfAttempts,
-							skippedMode: false,
+							skippedMode: true,
 							regularFlowQuestionIdx: null,
 							regularFlowQuestion: null,
 							regularFlowCompleted: true

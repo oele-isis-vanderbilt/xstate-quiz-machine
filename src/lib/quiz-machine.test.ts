@@ -478,5 +478,113 @@ describe('quiz machine', () => {
 			actor.send({ type: Commands.FORCE_REVIEW });
 			expect(actor.getSnapshot().matches(QuizStates.REVIEWING)).toBe(true);
 		});
+
+		it('should not show already-answered questions when jumping between skipped questions', async () => {
+			const context = {
+				...initialContext,
+				maxAttemptPerQuestion: 2,
+				responseLoggerFn: vi.fn(),
+				graderFn: (question, response) => {
+					return {
+						correct: question.answer === response,
+						payload: response
+					};
+				}
+			};
+			const quizMachine = createQuizMachine(context, 1000);
+			const actor = createActor(quizMachine);
+			actor.start();
+			actor.send({ type: Commands.START });
+			
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: '4' });
+			await simulatedDelay(1200);
+			
+			actor.send({ type: Commands.SKIP });
+			actor.send({ type: Commands.CONFIRM_SKIP });
+			
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Jupiter' });
+			await simulatedDelay(1200);
+			
+			let snapshot = actor.getSnapshot();
+			expect(snapshot.context.currentQuestion.id).toBe('2');
+			expect(snapshot.context.skippedMode).toBe(true);
+			
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'London' });
+			await simulatedDelay(1200);
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Berlin' });
+			await simulatedDelay(1200);
+			
+			snapshot = actor.getSnapshot();
+			expect(snapshot.matches(QuizStates.REVIEWING)).toBe(true);
+			
+			const q1Responses = snapshot.context.events.filter(
+				e => e.type === AttemptEvents.RESPONSE && e.question.id === '1'
+			);
+			const q3Responses = snapshot.context.events.filter(
+				e => e.type === AttemptEvents.RESPONSE && e.question.id === '3'
+			);
+			expect(q1Responses.length).toBe(1);
+			expect(q3Responses.length).toBe(1);
+		}, 10000);
+
+		it('should not allow more than max attempts when jumping to skipped questions', async () => {
+			const context = {
+				...initialContext,
+				maxAttemptPerQuestion: 2,
+				responseLoggerFn: vi.fn(),
+				graderFn: (question, response) => {
+					return {
+						correct: question.answer === response,
+						payload: response
+					};
+				}
+			};
+			const quizMachine = createQuizMachine(context, 1000);
+			const actor = createActor(quizMachine);
+			actor.start();
+			actor.send({ type: Commands.START });
+			
+			for (let i = 0; i < simpleQuestions.length; i++) {
+				actor.send({ type: Commands.SKIP });
+				actor.send({ type: Commands.CONFIRM_SKIP });
+			}
+			
+			let snapshot = actor.getSnapshot();
+			expect(snapshot.context.skippedMode).toBe(true);
+			expect(snapshot.context.currentQuestion.id).toBe('1');
+			
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: '5' });
+			await simulatedDelay(1200);
+			
+			actor.send({ type: Commands.GOTO_SKIPPED, skippedQuestionId: '3' });
+			snapshot = actor.getSnapshot();
+			expect(snapshot.context.currentQuestion.id).toBe('3');
+			
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Jupiter' });
+			await simulatedDelay(1200);
+			
+			snapshot = actor.getSnapshot();
+			expect(snapshot.context.currentQuestion.id).toBe('2');
+			
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'London' });
+			await simulatedDelay(1200);
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: 'Berlin' });
+			await simulatedDelay(1200);
+			
+			snapshot = actor.getSnapshot();
+			expect(snapshot.context.currentQuestion.id).toBe('1');
+			
+			actor.send({ type: Commands.SUBMIT_ANSWER, response: '6' });
+			await simulatedDelay(1200);
+			
+			snapshot = actor.getSnapshot();
+			expect(snapshot.matches(QuizStates.REVIEWING)).toBe(true);
+			
+			const q1Responses = snapshot.context.events.filter(
+				e => e.type === AttemptEvents.RESPONSE && e.question.id === '1'
+			);
+			expect(q1Responses.length).toBe(2);
+			expect(q1Responses.every(r => !r.response?.correct)).toBe(true);
+		}, 10000);
 	});
 });
