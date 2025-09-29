@@ -484,6 +484,7 @@ describe('quiz machine', () => {
 				...initialContext,
 				maxAttemptPerQuestion: 2,
 				responseLoggerFn: vi.fn(),
+				// @ts-ignore
 				graderFn: (question, response) => {
 					return {
 						correct: question.answer === response,
@@ -532,6 +533,7 @@ describe('quiz machine', () => {
 				...initialContext,
 				maxAttemptPerQuestion: 2,
 				responseLoggerFn: vi.fn(),
+				// @ts-ignore
 				graderFn: (question, response) => {
 					return {
 						correct: question.answer === response,
