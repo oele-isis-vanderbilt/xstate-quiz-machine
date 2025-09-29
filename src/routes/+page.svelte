@@ -94,7 +94,7 @@
 		{
 			attemptDuration: 200,
 			reviewDuration: 60,
-			maxAttemptPerQuestion: 3,
+			maxAttemptPerQuestion: 2,
 			questions: questions,
 			eventsLogger: logger,
 			responseLoggerFn: (question, response) => {
