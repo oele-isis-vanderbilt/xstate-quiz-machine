@@ -426,19 +426,37 @@ export const createQuizMachine = <E, R>(
 				const newSkipedQuestions = new Map(context.skipedQuestions);
 				newSkipedQuestions.delete(skippedQuestionId);
 
-				return {
-					skippedMode: true,
-					skipedQuestions: newSkipedQuestions,
-					currentQuestion: questionToGo,
-					currentQuestionIdx: skippedQuestionIdx,
-					regularFlowQuestionIdx: context.currentQuestionIdx,
-					regularFlowQuestion: context.currentQuestion,
-					noOfAttempts: findNumberofAttemptsForQuestion(
-						context.events,
-						skippedQuestionId,
-						context.questionIdentifierFn
-					)
-				};
+				if (!context.skippedMode) {
+					return {
+						skippedMode: true,
+						skipedQuestions: newSkipedQuestions,
+						currentQuestion: questionToGo,
+						currentQuestionIdx: skippedQuestionIdx,
+						regularFlowQuestionIdx: context.currentQuestionIdx,
+						regularFlowQuestion: context.currentQuestion,
+						noOfAttempts: findNumberofAttemptsForQuestion(
+							context.events,
+							skippedQuestionId,
+							context.questionIdentifierFn
+						)
+					};
+				} else {
+					newSkipedQuestions.set(
+						context.questionIdentifierFn(context.currentQuestion),
+						context.currentQuestion
+					);
+					return {
+						skippedMode: true,
+						skipedQuestions: newSkipedQuestions,
+						currentQuestion: questionToGo,
+						currentQuestionIdx: skippedQuestionIdx,
+						noOfAttempts: findNumberofAttemptsForQuestion(
+							context.events,
+							skippedQuestionId,
+							context.questionIdentifierFn
+						)
+					};
+				}
 			})
 		},
 		actors: {
