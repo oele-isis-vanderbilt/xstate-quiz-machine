@@ -77,6 +77,6 @@
 	},
 	"dependencies": {
 		"@xstate/svelte": "^4.0.5",
-		"xstate": "^5.19.4"
+		"xstate": "^5.28.0"
 	}
 }
