@@ -64,6 +64,61 @@ export interface Context<E, R> {
 	regularFlowCompleted: boolean;
 }
 
+export interface FSMProblem<E> {
+	question: E;
+	id: string;
+	isSkipped: boolean;
+	attemptsLeft: number;
+	maxAttempts: number;
+}
+
+export interface ContextV2<E, R> {
+	currentQuestion: FSMProblem<E>;
+	maxAttemptPerQuestion: number;
+	currentQuestionIdx: number;
+	attemptDuration: number;
+	reviewDuration: number;
+	timeLeft: number;
+	elapsedTime: number;
+	stateStartTime: number;
+	questions: FSMProblem<E>[];
+	noOfAttempts: number;
+	graderFn: (
+		question: E,
+		response: R
+	) => {
+		correct: boolean;
+		payload?: R;
+	};
+	questionIdentifierFn: (question: E) => string;
+	responseLoggerFn: (question: E, response: R) => void;
+	eventsLogger: {
+		info: (message: string) => void;
+		error: (message: string) => void;
+		debug: (message: string) => void;
+		warn: (message: string) => void;
+	};
+	events: QuizResponseEvent<E, R>[];
+	stageSummaries: {
+		[QuizStates.IN_PROGRESS]: {
+			questionsAttempted: number;
+			questionsSkipped: number;
+			questionsCorrect: number;
+			questionsIncorrect: number;
+			timeSpentSeconds: number;
+		};
+		[QuizStates.REVIEWING]: {
+			timeSpentSeconds: number;
+		};
+	};
+	attemptStartTime: number;
+	skipedQuestions: Map<string, E>;
+	regularFlowQuestionIdx: number | null;
+	regularFlowQuestion: E | null;
+	skippedMode: boolean;
+	regularFlowCompleted: boolean;
+}
+
 type RequiredContextKeys =
 	| 'questions'
 	| 'graderFn'
@@ -75,9 +130,13 @@ type RequiredContextKeys =
 	| 'maxAttemptPerQuestion';
 
 type OptionalContextKeys<E, R> = Exclude<keyof Context<E, R>, RequiredContextKeys>;
+type OptionalContextKeysV2<E, R> = Exclude<keyof ContextV2<E, R>, RequiredContextKeys>;
 
 export type InitialContext<E, R> = Pick<Context<E, R>, RequiredContextKeys> &
 	Partial<Pick<Context<E, R>, OptionalContextKeys<E, R>>>;
+
+export type InitialContextV2<E, R> = Pick<ContextV2<E, R>, RequiredContextKeys> &
+	Partial<Pick<ContextV2<E, R>, OptionalContextKeysV2<E, R>>>;
 
 export enum QuizStates {
 	STARTING = 'starting',

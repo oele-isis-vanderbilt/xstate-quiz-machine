@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createQuizMachine } from '$lib';
+	import { createQuizMachineV2 } from '$lib';
 	import {
 		AttemptEvents,
 		Commands,
@@ -79,6 +79,13 @@
 		}
 	];
 
+	const skippedQuestions = new Map<string, SimpleQuestion>();
+
+	// skippedQuestions.set('2', questions[1]);
+	// skippedQuestions.set('3', questions[3]);
+	// skippedQuestions.set('5', questions[4]);
+	// skippedQuestions.set('6', questions[5]);
+
 	const friendlyDateTime = (timestamp: number): string => {
 		const date = new Date(timestamp);
 		return date.toLocaleString('en-US', {
@@ -90,12 +97,18 @@
 			second: '2-digit'
 		});
 	};
-	const quizMachine = createQuizMachine<SimpleQuestion, string>(
+	const quizMachine = createQuizMachineV2<SimpleQuestion, string>(
 		{
 			attemptDuration: 200,
 			reviewDuration: 60,
 			maxAttemptPerQuestion: 2,
-			questions: questions,
+			questions: questions.map((q) => ({
+				question: q,
+				id: q.id,
+				attemptsLeft: 2,
+				isSkipped: false,
+				maxAttempts: 2
+			})),
 			eventsLogger: logger,
 			responseLoggerFn: (question, response) => {
 				logger.info(
@@ -109,7 +122,8 @@
 					payload: response,
 					explanation: question.explaination
 				};
-			}
+			},
+			skipedQuestions: skippedQuestions
 		},
 		500
 	);
@@ -193,7 +207,7 @@
 		return !!(
 			isGrading() &&
 			$snapshot.context.events.at(-1)?.response?.correct &&
-			$snapshot.context.currentQuestion.answer === option
+			$snapshot.context.currentQuestion.question.answer === option
 		);
 	}
 
@@ -204,6 +218,8 @@
 			isPopOverOpen = true;
 		}
 	});
+
+	$inspect($snapshot.context.currentQuestion);
 </script>
 
 <div class="mx-auto flex w-full flex-row gap-2 p-5">
@@ -231,10 +247,10 @@
 					<h2 class="text-xl font-semibold">
 						Question {$snapshot.context.currentQuestionIdx + 1}:
 					</h2>
-					<p class="mt-2">{$snapshot.context.currentQuestion.question}</p>
+					<p class="mt-2">{$snapshot.context.currentQuestion.question.question}</p>
 				</div>
 				<div class="mt-4 grid grid-cols-2 gap-2">
-					{#each $snapshot.context.currentQuestion.options as option, index (index)}
+					{#each $snapshot.context.currentQuestion.question.options as option, index (index)}
 						<Button
 							outline={isOptionSelected(option) ? false : true}
 							color={isOptionSelected(option) && !isCorrectSelection(option) ? 'red' : 'green'}
@@ -244,7 +260,7 @@
 								selectedOptions = [...selectedOptions, option];
 								send({
 									type: Commands.SUBMIT_ANSWER,
-									question: $snapshot.context.currentQuestion,
+									question: $snapshot.context.currentQuestion.question,
 									response: option
 								});
 							}}

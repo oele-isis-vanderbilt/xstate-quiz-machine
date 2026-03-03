@@ -498,13 +498,20 @@ export const createQuizMachine = <E, R>(
 							};
 						}
 
+						const nextQuestionId = context.questionIdentifierFn(context.questions[nextIdx]);
+						const newSkipedQuestions = new Map(context.skipedQuestions);
+						if (newSkipedQuestions.has(nextQuestionId)) {
+							newSkipedQuestions.delete(nextQuestionId);
+						}
+
 						return {
 							skippedMode: false,
 							regularFlowQuestionIdx: null,
 							regularFlowQuestion: null,
 							currentQuestionIdx: nextIdx,
 							currentQuestion: context.questions[nextIdx],
-							noOfAttempts: 0
+							noOfAttempts: 0,
+							skipedQuestions: newSkipedQuestions
 						};
 					} else {
 						return {
@@ -618,10 +625,29 @@ export const createQuizMachine = <E, R>(
 					};
 				}
 
+				if (shouldIncrement) {
+					const nextQuestionId = context.questionIdentifierFn(context.questions[nextIdx]);
+					const newSkipedQuestions = new Map(context.skipedQuestions);
+					if (newSkipedQuestions.has(nextQuestionId)) {
+						newSkipedQuestions.delete(nextQuestionId);
+					}
+
+					return {
+						noOfAttempts: 0,
+						currentQuestionIdx: nextIdx,
+						currentQuestion: context.questions[nextIdx],
+						skippedMode: false,
+						regularFlowQuestionIdx: null,
+						regularFlowQuestion: null,
+						regularFlowCompleted: false,
+						skipedQuestions: newSkipedQuestions
+					};
+				}
+
 				return {
-					noOfAttempts: shouldIncrement ? 0 : context.noOfAttempts,
-					currentQuestionIdx: shouldIncrement ? nextIdx : context.currentQuestionIdx,
-					currentQuestion: shouldIncrement ? context.questions[nextIdx] : context.currentQuestion,
+					noOfAttempts: context.noOfAttempts,
+					currentQuestionIdx: context.currentQuestionIdx,
+					currentQuestion: context.currentQuestion,
 					skippedMode: false,
 					regularFlowQuestionIdx: null,
 					regularFlowQuestion: null,
