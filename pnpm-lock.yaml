@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  xstate-quiz-machine: 'link:'
+
 importers:
 
   .:
@@ -14,6 +17,9 @@ importers:
       xstate:
         specifier: ^5.28.0
         version: 5.28.0
+      xstate-quiz-machine:
+        specifier: 'link:'
+        version: 'link:'
     devDependencies:
       '@eslint/compat':
         specifier: ^1.2.5

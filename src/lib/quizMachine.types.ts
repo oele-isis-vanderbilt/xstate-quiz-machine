@@ -70,12 +70,12 @@ export interface FSMProblem<E> {
 	isSkipped: boolean;
 	attemptsLeft: number;
 	maxAttempts: number;
+	skipOrder: number | null;
 }
 
 export interface ContextV2<E, R> {
-	currentQuestion: FSMProblem<E>;
-	maxAttemptPerQuestion: number;
-	currentQuestionIdx: number;
+	currentQuestion: FSMProblem<E> | null;
+	currentQuestionIdx: number | null;
 	attemptDuration: number;
 	reviewDuration: number;
 	timeLeft: number;
@@ -112,11 +112,7 @@ export interface ContextV2<E, R> {
 		};
 	};
 	attemptStartTime: number;
-	skipedQuestions: Map<string, E>;
-	regularFlowQuestionIdx: number | null;
-	regularFlowQuestion: E | null;
-	skippedMode: boolean;
-	regularFlowCompleted: boolean;
+	canForceReview: boolean;
 }
 
 type RequiredContextKeys =

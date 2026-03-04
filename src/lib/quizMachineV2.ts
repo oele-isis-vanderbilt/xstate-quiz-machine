@@ -23,8 +23,8 @@ export const createQuizMachineV2 = <E, R>(
 		attemptDuration: ctx.attemptDuration,
 		questions: ctx.questions,
 		attemptStartTime: ctx.attemptStartTime || Date.now(),
-		currentQuestionIdx: ctx.currentQuestionIdx || 0,
-		currentQuestion: ctx.currentQuestion || ctx.questions[0],
+		currentQuestionIdx: null,
+		currentQuestion: null,
 		elapsedTime: ctx.elapsedTime || 0,
 		stateStartTime: ctx.stateStartTime || Date.now(),
 		timeLeft: ctx.timeLeft || ctx.attemptDuration,
@@ -33,7 +33,6 @@ export const createQuizMachineV2 = <E, R>(
 		graderFn: ctx.graderFn,
 		questionIdentifierFn: ctx.questionIdentifierFn,
 		eventsLogger: ctx.eventsLogger || console,
-		maxAttemptPerQuestion: ctx.maxAttemptPerQuestion || 1,
 		reviewDuration: ctx.reviewDuration || 30,
 		noOfAttempts: 0,
 		stageSummaries: ctx.stageSummaries || {
@@ -48,11 +47,7 @@ export const createQuizMachineV2 = <E, R>(
 				timeSpentSeconds: 0
 			}
 		},
-		skipedQuestions: ctx.skipedQuestions || new Map<string, E>(),
-		regularFlowQuestionIdx: ctx.regularFlowQuestionIdx || null,
-		regularFlowQuestion: ctx.regularFlowQuestion || null,
-		skippedMode: ctx.skippedMode || false,
-		regularFlowCompleted: ctx.regularFlowCompleted || false
+		canForceReview: false
 	});
 
 	const getInProgressStageSummary = (context: ContextV2<E, R>) => {
@@ -119,17 +114,17 @@ export const createQuizMachineV2 = <E, R>(
 				return remainingAttempts.every((attempts) => attempts <= 0);
 			},
 			isValidSkippedQuestion: ({ context, event }) => {
-				const skippedQuestionId = event.skippedQuestionId!;
+				const skippedQuestionId = event.skippedQuestionId! || context.currentQuestion!.id;
 				const problem = context.questions.find((q) => q.id === skippedQuestionId)!;
 				return problem.isSkipped && problem.attemptsLeft > 0;
 			},
 			regularFlowCompleted: ({ context }) => {
-				return context.regularFlowCompleted;
+				return context.canForceReview;
 			}
 		},
 		actions: {
 			evaluateResponse: assign(({ context, event }) => {
-				const fsmProblem = context.currentQuestion;
+				const fsmProblem = context.currentQuestion!;
 				const response = event.response!;
 				const timestamp = Date.now();
 				const timeSpentSeconds = Math.floor((timestamp - context.attemptStartTime) / 1000);
@@ -157,7 +152,8 @@ export const createQuizMachineV2 = <E, R>(
 							return {
 								...problem,
 								attemptsLeft: attemptsLeft,
-								isSkipped: isSkipped
+								isSkipped: isSkipped,
+								skipOrder: null
 							};
 						}
 						return problem;
@@ -169,24 +165,56 @@ export const createQuizMachineV2 = <E, R>(
 				const firstNonSkippedQuestionWithAttemptsLeft = context.questions.find(
 					(q) => !q.isSkipped && q.attemptsLeft > 0
 				);
-                console.log('First non skipped question with attempts left:', firstNonSkippedQuestionWithAttemptsLeft);
 				if (firstNonSkippedQuestionWithAttemptsLeft) {
-                    const currentQuestionIdx = context.questions.findIndex(
-                        (q) => q.id === firstNonSkippedQuestionWithAttemptsLeft.id
-                    );
+					const currentQuestionIdx = context.questions.findIndex(
+						(q) => q.id === firstNonSkippedQuestionWithAttemptsLeft.id
+					);
+
+					const updatedQuestions = context.questions.map((q, idx) => {
+						if (idx === currentQuestionIdx) {
+							return {
+								...q,
+								isSkipped: false,
+								skipOrder: null
+							};
+						}
+						return q;
+					});
 					return {
 						currentQuestion: firstNonSkippedQuestionWithAttemptsLeft,
-                        currentQuestionIdx: currentQuestionIdx
+						currentQuestionIdx: currentQuestionIdx,
+						questions: updatedQuestions
 					};
 				} else {
-					const nextSkippedQuestion = context.questions.find(
+					const skippedQuestions = context.questions.filter(
 						(q) => q.isSkipped && q.attemptsLeft > 0
 					);
+					const sortedSkippedQuestions = skippedQuestions.sort(
+						(a, b) => a.skipOrder! - b.skipOrder!
+					);
+					const nextSkippedQuestion = sortedSkippedQuestions[0];
+					const nextSkippedQuestionIdx = context.questions.findIndex(
+						(q) => q.id === nextSkippedQuestion.id
+					);
+					const updatedQuestions = context.questions.map((q, idx) => {
+						if (idx === nextSkippedQuestionIdx) {
+							return {
+								...q,
+								isSkipped: false,
+								skipOrder: null
+							};
+						}
+						return q;
+					});
+
 					if (nextSkippedQuestion) {
 						return {
 							currentQuestion: nextSkippedQuestion,
-							skippedMode: true
+							questions: updatedQuestions,
+							currentQuestionIdx: nextSkippedQuestionIdx
 						};
+					} else {
+						return {};
 					}
 				}
 			}),
@@ -194,26 +222,28 @@ export const createQuizMachineV2 = <E, R>(
 				timeLeft: () => 0
 			}),
 			markQuestionSkipped: assign(({ context, event }) => {
-				const skippedQuestionId = event.skippedQuestionId!;
+				const skippedQuestionId = event.skippedQuestionId! || context.currentQuestion!.id;
 				const problemIdx = context.questions.findIndex((q) => q.id === skippedQuestionId)!;
-                const skipEvent = {
-                    type: AttemptEvents.SKIP,
-                    timestamp: Date.now(),
-                    question: context.questions[problemIdx].question
-                };
-                const updatedEvents = context.events.concat(skipEvent);
+				const timeStamp = Date.now();
+				const skipEvent = {
+					type: AttemptEvents.SKIP,
+					timestamp: timeStamp,
+					question: context.questions[problemIdx].question
+				};
+				const updatedEvents = context.events.concat(skipEvent);
 				const updatedProblems = context.questions.map((problem, idx) => {
 					if (idx === problemIdx) {
 						return {
 							...problem,
-							isSkipped: true
+							isSkipped: true,
+							skipOrder: timeStamp
 						};
 					}
 					return problem;
 				});
 				return {
 					questions: updatedProblems,
-                    events: updatedEvents
+					events: updatedEvents
 				};
 			}),
 			setAttemptStartTime: assign({
@@ -239,20 +269,51 @@ export const createQuizMachineV2 = <E, R>(
 			}),
 			goToSkippedQuestion: assign(({ context, event }) => {
 				const skippedQuestionId = event.skippedQuestionId!;
-				const problem = context.questions.find((q) => q.id === skippedQuestionId)!;
+				const skippedQuestion = context.questions.find((q) => q.id === skippedQuestionId)!;
+				const timeStamp = Date.now();
+				const skipEvent: QuizResponseEvent<E, R> = {
+					type: AttemptEvents.SKIP,
+					timestamp: timeStamp,
+					question: context.currentQuestion!.question
+				};
+				const updatedEvents = context.events.concat(skipEvent);
 				const updatedProblems = context.questions.map((p) => {
 					if (p.id === skippedQuestionId) {
 						return {
 							...p,
-							isSkipped: false
+							isSkipped: false,
+							skipOrder: null
+						};
+					}
+					if (p.id === context.currentQuestion!.id) {
+						return {
+							...p,
+							isSkipped: true,
+							skipOrder: timeStamp
 						};
 					}
 					return p;
 				});
 				return {
-					currentQuestion: problem.question,
+					currentQuestion: skippedQuestion,
+					currentQuestionIdx: context.questions.findIndex((q) => q.id === skippedQuestionId),
 					questions: updatedProblems,
-					skippedMode: true
+					events: updatedEvents
+				};
+			}),
+			updateCanForceReview: assign(({ context }) => {
+				const seenQuestionIds = new Set(
+					context.events
+						.filter((e) => e.type === AttemptEvents.RESPONSE || e.type === AttemptEvents.SKIP)
+						.map((e) => context.questionIdentifierFn(e.question))
+				);
+				if (context.currentQuestion) {
+					seenQuestionIds.add(context.questionIdentifierFn(context.currentQuestion.question));
+				}
+				return {
+					canForceReview: context.questions.every((q) =>
+						seenQuestionIds.has(context.questionIdentifierFn(q.question))
+					)
 				};
 			})
 		},
@@ -319,7 +380,9 @@ export const createQuizMachineV2 = <E, R>(
 					stateStartTime: () => Date.now(),
 					timeLeft: ({ context }) => context.attemptDuration,
 					currentQuestion: ({ context }) =>
-						context.questions.find((q) => !q.isSkipped && q.attemptsLeft !== 0)!
+						context.questions.find((q) => !q.isSkipped && q.attemptsLeft !== 0)!,
+					currentQuestionIdx: ({ context }) =>
+						context.questions.findIndex((q) => !q.isSkipped && q.attemptsLeft !== 0)!
 				}),
 				invoke: {
 					id: 'attemptTick',
@@ -331,7 +394,7 @@ export const createQuizMachineV2 = <E, R>(
 				initial: InProgressStages.WAITING_FOR_ANSWER,
 				states: {
 					[InProgressStages.WAITING_FOR_ANSWER]: {
-						entry: ['setAttemptStartTime'],
+						entry: ['setAttemptStartTime', 'updateCanForceReview'],
 						on: {
 							[Commands.SUBMIT_ANSWER]: {
 								target: InProgressStages.GRADING
