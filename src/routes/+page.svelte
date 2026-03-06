@@ -94,7 +94,6 @@
 		{
 			attemptDuration: 200,
 			reviewDuration: 60,
-			maxAttemptPerQuestion: 2,
 			questions: questions.map((q, index) => ({
 				question: q,
 				id: q.id,
@@ -136,7 +135,6 @@
 				attemptDuration: stateSnapshot.context.attemptDuration,
 				reviewDuration: stateSnapshot.context.reviewDuration,
 				timeLeft: stateSnapshot.context.timeLeft,
-				maxAttemptPerQuestion: stateSnapshot.context.maxAttemptPerQuestion,
 				attemptCount: stateSnapshot.context.noOfAttempts,
 				skippedProblems: $skippedProblems.keys()
 			},
