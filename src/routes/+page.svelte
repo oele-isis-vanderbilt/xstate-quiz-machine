@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createQuizMachine } from '$lib';
+	import { createQuizMachineV2 } from '$lib';
 	import {
 		AttemptEvents,
 		Commands,
@@ -8,7 +8,7 @@
 		type QuizResponseEvent
 	} from '$lib/quizMachine.types';
 	import { Button, Popover } from 'flowbite-svelte';
-	import { useActor } from '@xstate/svelte';
+	import { useActor, useSelector } from '@xstate/svelte';
 	import type { SimpleQuestion } from '$lib/types';
 	import type { SnapshotFrom } from 'xstate';
 	import { Confetti } from 'svelte-confetti';
@@ -90,12 +90,18 @@
 			second: '2-digit'
 		});
 	};
-	const quizMachine = createQuizMachine<SimpleQuestion, string>(
+	const quizMachine = createQuizMachineV2<SimpleQuestion, string>(
 		{
 			attemptDuration: 200,
 			reviewDuration: 60,
-			maxAttemptPerQuestion: 2,
-			questions: questions,
+			questions: questions.map((q, index) => ({
+				question: q,
+				id: q.id,
+				attemptsLeft: 2,
+				isSkipped: index % 2 === 1,
+				maxAttempts: 2,
+				skipOrder: index % 2 === 1 ? Date.now() : null
+			})),
 			eventsLogger: logger,
 			responseLoggerFn: (question, response) => {
 				logger.info(
@@ -114,7 +120,12 @@
 		500
 	);
 
-	const { snapshot, send } = useActor(quizMachine);
+	const { snapshot, send, actorRef } = useActor(quizMachine);
+	let skippedProblems = useSelector(actorRef, (state) =>
+		state.context.questions
+			.filter((q) => q.isSkipped)
+			.sort((a, b) => (a.skipOrder! > b.skipOrder! ? -1 : 1))
+	);
 
 	function contextJSON(stateSnapshot: SnapshotFrom<typeof quizMachine>): string {
 		return JSON.stringify(
@@ -124,12 +135,8 @@
 				attemptDuration: stateSnapshot.context.attemptDuration,
 				reviewDuration: stateSnapshot.context.reviewDuration,
 				timeLeft: stateSnapshot.context.timeLeft,
-				maxAttemptPerQuestion: stateSnapshot.context.maxAttemptPerQuestion,
 				attemptCount: stateSnapshot.context.noOfAttempts,
-				skippedMode: stateSnapshot.context.skippedMode,
-				skipedQuestions: Array.from(stateSnapshot.context.skipedQuestions.keys()),
-				regularFlowIndex: stateSnapshot.context.regularFlowQuestionIdx,
-				regularFlowCompleted: stateSnapshot.context.regularFlowCompleted
+				skippedProblems: $skippedProblems.keys()
 			},
 			null,
 			2
@@ -186,14 +193,14 @@
 	}
 
 	function canForceReview(): boolean {
-		return $snapshot.context.regularFlowCompleted;
+		return $snapshot.context.canForceReview;
 	}
 
 	function isCorrectSelection(option: string): boolean {
 		return !!(
 			isGrading() &&
 			$snapshot.context.events.at(-1)?.response?.correct &&
-			$snapshot.context.currentQuestion.answer === option
+			$snapshot.context.currentQuestion?.question.answer === option
 		);
 	}
 
@@ -229,12 +236,12 @@
 			<div class="flex w-full flex-col gap-2">
 				<div class="rounded-lg bg-white p-4 shadow-md">
 					<h2 class="text-xl font-semibold">
-						Question {$snapshot.context.currentQuestionIdx + 1}:
+						Question {$snapshot.context.currentQuestionIdx! + 1}:
 					</h2>
-					<p class="mt-2">{$snapshot.context.currentQuestion.question}</p>
+					<p class="mt-2">{$snapshot.context.currentQuestion!.question.question}</p>
 				</div>
 				<div class="mt-4 grid grid-cols-2 gap-2">
-					{#each $snapshot.context.currentQuestion.options as option, index (index)}
+					{#each $snapshot.context.currentQuestion!.question.options as option, index (index)}
 						<Button
 							outline={isOptionSelected(option) ? false : true}
 							color={isOptionSelected(option) && !isCorrectSelection(option) ? 'red' : 'green'}
@@ -244,7 +251,7 @@
 								selectedOptions = [...selectedOptions, option];
 								send({
 									type: Commands.SUBMIT_ANSWER,
-									question: $snapshot.context.currentQuestion,
+									question: $snapshot.context.currentQuestion!.question,
 									response: option
 								});
 							}}
@@ -365,33 +372,33 @@
 	<div class="flex max-h-96 w-1/3 flex-col rounded-lg bg-gray-100 p-2 shadow-sm">
 		<h1 class="mb-4 text-3xl font-bold">Skipped Problems</h1>
 		<div class="flex-1 overflow-y-auto">
-			{#if $snapshot.context.skipedQuestions.size === 0}
+			{#if $skippedProblems.length === 0}
 				<div class="rounded-lg bg-white p-4 shadow-sm">
 					<p class="text-sm text-gray-500">No problems skipped yet</p>
 				</div>
 			{:else}
-				{#each Array.from($snapshot.context.skipedQuestions.entries()) as [questionId, question] (questionId)}
+				{#each $skippedProblems as simpleProblem (simpleProblem.id)}
 					<div class="mb-2 rounded-lg bg-white p-4 shadow-sm">
 						<div class="mb-2">
-							<span class="text-xs font-semibold text-gray-600">ID: {questionId}</span>
+							<span class="text-xs font-semibold text-gray-600">ID: {simpleProblem.id}</span>
 						</div>
-						<p class="text-sm font-medium text-gray-800">{question.question}</p>
+						<p class="text-sm font-medium text-gray-800">{simpleProblem.question.question}</p>
 						<div class="mt-2 grid grid-cols-2 gap-1">
-							{#each question.options as option}
+							{#each simpleProblem.question.options as option}
 								<div class="rounded border bg-gray-100 p-1 text-xs">
 									{option}
 								</div>
 							{/each}
 						</div>
 						<button
-							class="mt-2 text-sm text-blue-500 underline hover:text-blue-700"
+							class="mt-2 cursor-pointer text-sm text-blue-500 underline hover:text-blue-700"
 							onclick={() =>
 								send({
 									type: Commands.GOTO_SKIPPED,
-									skippedQuestionId: questionId
+									skippedQuestionId: simpleProblem.id
 								})}
 						>
-							Go to Problem
+							Go to Problem | Last Skipped at: {friendlyDateTime(simpleProblem.skipOrder!)}
 						</button>
 					</div>
 				{/each}
