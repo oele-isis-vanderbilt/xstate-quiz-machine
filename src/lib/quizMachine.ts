@@ -21,20 +21,6 @@ const findNumberofAttemptsForQuestion = <E, R>(
 	return questionAttempts.length;
 };
 
-const isQuestionResolved = <E, R>(
-	events: QuizResponseEvent<E, R>[],
-	questionId: string,
-	questionIdentifierFn: (question: E) => string,
-	maxAttemptPerQuestion: number
-): boolean => {
-	const attempts = events.filter(
-		(e) => e.type === AttemptEvents.RESPONSE && questionIdentifierFn(e.question) === questionId
-	);
-	const answeredCorrectly = attempts.some((e) => e.response?.correct);
-	const attemptsExhausted = attempts.length >= maxAttemptPerQuestion;
-	return answeredCorrectly || attemptsExhausted;
-};
-
 export const createQuizMachine = <E, R>(
 	initialContext: InitialContext<E, R>,
 	delayBetweenAttempts: number = 1000
@@ -182,22 +168,7 @@ export const createQuizMachine = <E, R>(
 				if (context.skippedMode) {
 					regularFlowCompeleted = context.regularFlowCompleted;
 				} else {
-					let nextIdx = context.currentQuestionIdx + 1;
-					while (nextIdx < context.questions.length) {
-						const qId = context.questionIdentifierFn(context.questions[nextIdx]);
-						if (
-							!isQuestionResolved(
-								updatedResponses,
-								qId,
-								context.questionIdentifierFn,
-								context.maxAttemptPerQuestion
-							)
-						) {
-							break;
-						}
-						nextIdx++;
-					}
-					const wasLastQuestion = nextIdx >= context.questions.length;
+					const wasLastQuestion = context.currentQuestionIdx + 1 === context.questions.length;
 					regularFlowCompeleted = result.correct
 						? wasLastQuestion
 						: wasLastQuestion && noOfAttempts >= context.maxAttemptPerQuestion;
@@ -213,78 +184,12 @@ export const createQuizMachine = <E, R>(
 				if (context.skippedMode && !context.regularFlowCompleted) {
 					const lastRegularFlowQuestionIdx = context.regularFlowQuestionIdx!;
 					const lastRegularFlowQuestion = context.regularFlowQuestion!;
-
-					const returnQuestionId = context.questionIdentifierFn(lastRegularFlowQuestion);
-					let nextIdx = lastRegularFlowQuestionIdx;
-					if (
-						isQuestionResolved(
-							context.events,
-							returnQuestionId,
-							context.questionIdentifierFn,
-							context.maxAttemptPerQuestion
-						)
-					) {
-						nextIdx = lastRegularFlowQuestionIdx + 1;
-						while (nextIdx < context.questions.length) {
-							const qId = context.questionIdentifierFn(context.questions[nextIdx]);
-							if (
-								!isQuestionResolved(
-									context.events,
-									qId,
-									context.questionIdentifierFn,
-									context.maxAttemptPerQuestion
-								)
-							) {
-								break;
-							}
-							nextIdx++;
-						}
-					}
-
-					const wasLastQuestion = nextIdx >= context.questions.length;
-
-					if (wasLastQuestion) {
-						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value;
-						if (firstSkippedQuestionId) {
-							const questionToGo = context.skipedQuestions.get(firstSkippedQuestionId)!;
-							const skippedQuestionIdx = context.questions.findIndex(
-								(q) => context.questionIdentifierFn(q) === firstSkippedQuestionId
-							);
-							const newSkipedQuestions = new Map(context.skipedQuestions);
-							newSkipedQuestions.delete(firstSkippedQuestionId);
-							return {
-								skippedMode: true,
-								currentQuestionIdx: skippedQuestionIdx,
-								currentQuestion: questionToGo,
-								skipedQuestions: newSkipedQuestions,
-								noOfAttempts: findNumberofAttemptsForQuestion(
-									context.events,
-									firstSkippedQuestionId,
-									context.questionIdentifierFn
-								),
-								regularFlowQuestionIdx: null,
-								regularFlowQuestion: null,
-								regularFlowCompleted: true
-							};
-						} else {
-							return {
-								currentQuestionIdx: context.currentQuestionIdx,
-								currentQuestion: context.currentQuestion,
-								noOfAttempts: 0,
-								skippedMode: false,
-								regularFlowQuestionIdx: null,
-								regularFlowQuestion: null,
-								regularFlowCompleted: true
-							};
-						}
-					}
-
 					return {
 						skippedMode: false,
 						regularFlowQuestionIdx: null,
 						regularFlowQuestion: null,
-						currentQuestionIdx: nextIdx,
-						currentQuestion: context.questions[nextIdx],
+						currentQuestionIdx: lastRegularFlowQuestionIdx,
+						currentQuestion: lastRegularFlowQuestion,
 						noOfAttempts: 0
 					};
 				} else if (context.skippedMode && context.regularFlowCompleted) {
@@ -323,22 +228,7 @@ export const createQuizMachine = <E, R>(
 						};
 					}
 				} else {
-					let nextIdx = context.currentQuestionIdx + 1;
-					while (nextIdx < context.questions.length) {
-						const qId = context.questionIdentifierFn(context.questions[nextIdx]);
-						if (
-							!isQuestionResolved(
-								context.events,
-								qId,
-								context.questionIdentifierFn,
-								context.maxAttemptPerQuestion
-							)
-						) {
-							break;
-						}
-						nextIdx++;
-					}
-					const wasLastQuestion = nextIdx >= context.questions.length;
+					const wasLastQuestion = context.currentQuestionIdx + 1 === context.questions.length;
 					if (wasLastQuestion) {
 						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value;
 						if (firstSkippedQuestionId) {
@@ -362,21 +252,11 @@ export const createQuizMachine = <E, R>(
 								regularFlowQuestion: null,
 								regularFlowCompleted: true
 							};
-						} else {
-							return {
-								currentQuestionIdx: context.currentQuestionIdx,
-								currentQuestion: context.currentQuestion,
-								noOfAttempts: 0,
-								skippedMode: false,
-								regularFlowQuestionIdx: null,
-								regularFlowQuestion: null,
-								regularFlowCompleted: true
-							};
 						}
 					} else {
 						return {
-							currentQuestionIdx: nextIdx,
-							currentQuestion: context.questions[nextIdx],
+							currentQuestionIdx: context.currentQuestionIdx + 1,
+							currentQuestion: context.questions[context.currentQuestionIdx + 1],
 							noOfAttempts: 0
 						};
 					}
@@ -434,95 +314,18 @@ export const createQuizMachine = <E, R>(
 					context.noOfAttempts >= context.maxAttemptPerQuestion;
 
 				if (context.skippedMode && !context.regularFlowCompleted) {
-					if (shouldIncrement) {
-						const returnQuestionId = context.questionIdentifierFn(context.regularFlowQuestion!);
-						let nextIdx = context.regularFlowQuestionIdx!;
-						if (
-							isQuestionResolved(
-								context.events,
-								returnQuestionId,
-								context.questionIdentifierFn,
-								context.maxAttemptPerQuestion
-							)
-						) {
-							nextIdx = context.regularFlowQuestionIdx! + 1;
-							while (nextIdx < context.questions.length) {
-								const qId = context.questionIdentifierFn(context.questions[nextIdx]);
-								if (
-									!isQuestionResolved(
-										context.events,
-										qId,
-										context.questionIdentifierFn,
-										context.maxAttemptPerQuestion
-									)
-								) {
-									break;
-								}
-								nextIdx++;
-							}
-						}
-
-						const wasLastQuestion = nextIdx >= context.questions.length;
-
-						if (wasLastQuestion && context.skipedQuestions.size > 0) {
-							const firstSkippedQuestionId = context.skipedQuestions.keys().next().value!;
-							const questionToGo = context.skipedQuestions.get(firstSkippedQuestionId)!;
-							const skippedQuestionIdx = context.questions.findIndex(
-								(q) => context.questionIdentifierFn(q) === firstSkippedQuestionId
-							);
-							const newSkipedQuestions = new Map(context.skipedQuestions);
-							newSkipedQuestions.delete(firstSkippedQuestionId);
-							return {
-								skippedMode: true,
-								currentQuestionIdx: skippedQuestionIdx,
-								currentQuestion: questionToGo,
-								skipedQuestions: newSkipedQuestions,
-								noOfAttempts: findNumberofAttemptsForQuestion(
-									context.events,
-									firstSkippedQuestionId,
-									context.questionIdentifierFn
-								),
-								regularFlowQuestionIdx: null,
-								regularFlowQuestion: null,
-								regularFlowCompleted: true
-							};
-						} else if (wasLastQuestion) {
-							return {
-								noOfAttempts: 0,
-								currentQuestionIdx: context.currentQuestionIdx,
-								currentQuestion: context.currentQuestion,
-								skippedMode: false,
-								regularFlowQuestionIdx: null,
-								regularFlowQuestion: null,
-								regularFlowCompleted: true
-							};
-						}
-
-						const nextQuestionId = context.questionIdentifierFn(context.questions[nextIdx]);
-						const newSkipedQuestions = new Map(context.skipedQuestions);
-						if (newSkipedQuestions.has(nextQuestionId)) {
-							newSkipedQuestions.delete(nextQuestionId);
-						}
-
-						return {
-							skippedMode: false,
-							regularFlowQuestionIdx: null,
-							regularFlowQuestion: null,
-							currentQuestionIdx: nextIdx,
-							currentQuestion: context.questions[nextIdx],
-							noOfAttempts: 0,
-							skipedQuestions: newSkipedQuestions
-						};
-					} else {
-						return {
-							skippedMode: true,
-							regularFlowQuestionIdx: context.regularFlowQuestionIdx,
-							regularFlowQuestion: context.regularFlowQuestion,
-							currentQuestionIdx: context.currentQuestionIdx,
-							currentQuestion: context.currentQuestion,
-							noOfAttempts: context.noOfAttempts
-						};
-					}
+					return {
+						skippedMode: false,
+						regularFlowQuestionIdx: null,
+						regularFlowQuestion: null,
+						currentQuestionIdx: shouldIncrement
+							? context.regularFlowQuestionIdx
+							: context.currentQuestionIdx,
+						currentQuestion: shouldIncrement
+							? context.regularFlowQuestion
+							: context.currentQuestion,
+						noOfAttempts: shouldIncrement ? 0 : context.noOfAttempts
+					};
 				} else if (context.skippedMode && context.regularFlowCompleted) {
 					const skippedSize = context.skipedQuestions.size;
 					if (skippedSize === 0) {
@@ -536,6 +339,7 @@ export const createQuizMachine = <E, R>(
 							regularFlowCompleted: true
 						};
 					} else if (shouldIncrement) {
+						// Move to next skipped question
 						const firstSkippedQuestionId = context.skipedQuestions.keys().next().value!;
 						const questionToGo = context.skipedQuestions.get(firstSkippedQuestionId)!;
 						const skippedQuestionIdx = context.questions.findIndex(
@@ -559,6 +363,7 @@ export const createQuizMachine = <E, R>(
 							regularFlowCompleted: true
 						};
 					} else {
+						// Stay on current question
 						return {
 							currentQuestionIdx: context.currentQuestionIdx,
 							currentQuestion: context.currentQuestion,
@@ -572,22 +377,7 @@ export const createQuizMachine = <E, R>(
 					}
 				}
 
-				let nextIdx = context.currentQuestionIdx + 1;
-				while (nextIdx < context.questions.length) {
-					const qId = context.questionIdentifierFn(context.questions[nextIdx]);
-					if (
-						!isQuestionResolved(
-							context.events,
-							qId,
-							context.questionIdentifierFn,
-							context.maxAttemptPerQuestion
-						)
-					) {
-						break;
-					}
-					nextIdx++;
-				}
-				const wasLastQuestion = nextIdx >= context.questions.length;
+				const wasLastQuestion = context.currentQuestionIdx + 1 === context.questions.length;
 
 				if (wasLastQuestion && shouldIncrement && context.skipedQuestions.size > 0) {
 					const firstSkippedQuestionId = context.skipedQuestions.keys().next().value!;
@@ -613,41 +403,14 @@ export const createQuizMachine = <E, R>(
 					};
 				}
 
-				if (wasLastQuestion && shouldIncrement && context.skipedQuestions.size === 0) {
-					return {
-						noOfAttempts: 0,
-						currentQuestionIdx: context.currentQuestionIdx,
-						currentQuestion: context.currentQuestion,
-						skippedMode: false,
-						regularFlowQuestionIdx: null,
-						regularFlowQuestion: null,
-						regularFlowCompleted: true
-					};
-				}
-
-				if (shouldIncrement) {
-					const nextQuestionId = context.questionIdentifierFn(context.questions[nextIdx]);
-					const newSkipedQuestions = new Map(context.skipedQuestions);
-					if (newSkipedQuestions.has(nextQuestionId)) {
-						newSkipedQuestions.delete(nextQuestionId);
-					}
-
-					return {
-						noOfAttempts: 0,
-						currentQuestionIdx: nextIdx,
-						currentQuestion: context.questions[nextIdx],
-						skippedMode: false,
-						regularFlowQuestionIdx: null,
-						regularFlowQuestion: null,
-						regularFlowCompleted: false,
-						skipedQuestions: newSkipedQuestions
-					};
-				}
-
 				return {
-					noOfAttempts: context.noOfAttempts,
-					currentQuestionIdx: context.currentQuestionIdx,
-					currentQuestion: context.currentQuestion,
+					noOfAttempts: shouldIncrement ? 0 : context.noOfAttempts,
+					currentQuestionIdx: shouldIncrement
+						? context.currentQuestionIdx + 1
+						: context.currentQuestionIdx,
+					currentQuestion: shouldIncrement
+						? context.questions[context.currentQuestionIdx + 1]
+						: context.currentQuestion,
 					skippedMode: false,
 					regularFlowQuestionIdx: null,
 					regularFlowQuestion: null,
