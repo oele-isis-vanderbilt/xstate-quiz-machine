@@ -113,6 +113,8 @@ export interface ContextV2<E, R> {
 	};
 	attemptStartTime: number;
 	canForceReview: boolean;
+	onAttemptTimeout: () => void;
+	onReviewTimeout: () => void;
 }
 
 type RequiredContextKeys =
@@ -125,13 +127,21 @@ type RequiredContextKeys =
 	| 'reviewDuration'
 	| 'maxAttemptPerQuestion';
 
+type RequiredContextKeysV2 =
+	| 'questions'
+	| 'graderFn'
+	| 'questionIdentifierFn'
+	| 'responseLoggerFn'
+	| 'attemptDuration'
+	| 'reviewDuration';
+
 type OptionalContextKeys<E, R> = Exclude<keyof Context<E, R>, RequiredContextKeys>;
 type OptionalContextKeysV2<E, R> = Exclude<keyof ContextV2<E, R>, RequiredContextKeys>;
 
 export type InitialContext<E, R> = Pick<Context<E, R>, RequiredContextKeys> &
 	Partial<Pick<Context<E, R>, OptionalContextKeys<E, R>>>;
 
-export type InitialContextV2<E, R> = Pick<ContextV2<E, R>, RequiredContextKeys> &
+export type InitialContextV2<E, R> = Pick<ContextV2<E, R>, RequiredContextKeysV2> &
 	Partial<Pick<ContextV2<E, R>, OptionalContextKeysV2<E, R>>>;
 
 export enum QuizStates {

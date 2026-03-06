@@ -47,7 +47,9 @@ export const createQuizMachineV2 = <E, R>(
 				timeSpentSeconds: 0
 			}
 		},
-		canForceReview: false
+		canForceReview: false,
+		onAttemptTimeout: ctx.onAttemptTimeout || (() => {}),
+		onReviewTimeout: ctx.onReviewTimeout || (() => {})
 	});
 
 	const getInProgressStageSummary = (context: ContextV2<E, R>) => {
@@ -141,14 +143,13 @@ export const createQuizMachineV2 = <E, R>(
 
 				context.responseLoggerFn(question, response);
 				const updatedResponses = context.events.concat(responseEvent);
-				const fsmProblemIdx = context.questions.findIndex((q) => q.question === question);
 				const attemptsLeft = result.correct ? 0 : fsmProblem.attemptsLeft - 1;
 				const isSkipped = false;
 
 				return {
 					events: updatedResponses,
 					questions: context.questions.map((problem, idx) => {
-						if (idx === fsmProblemIdx) {
+						if (problem.id === fsmProblem.id) {
 							return {
 								...problem,
 								attemptsLeft: attemptsLeft,
@@ -315,6 +316,14 @@ export const createQuizMachineV2 = <E, R>(
 						seenQuestionIds.has(context.questionIdentifierFn(q.question))
 					)
 				};
+			}),
+			attemptTimeoutCallback: assign(({ context }) => {
+				context.onAttemptTimeout();
+				return {};
+			}),
+			reviewTimeoutCallback: assign(({ context }) => {
+				context.onReviewTimeout();
+				return {};
 			})
 		},
 		actors: {
@@ -457,7 +466,8 @@ export const createQuizMachineV2 = <E, R>(
 						}
 					],
 					[Commands.TIMEOUT]: {
-						target: QuizStates.REVIEWING
+						target: QuizStates.REVIEWING,
+						actions: ['attemptTimeoutCallback']
 					}
 				},
 				exit: [
@@ -490,7 +500,8 @@ export const createQuizMachineV2 = <E, R>(
 						}
 					],
 					[Commands.TIMEOUT]: {
-						target: QuizStates.COMPLETED
+						target: QuizStates.COMPLETED,
+						actions: ['reviewTimeoutCallback']
 					},
 					[Commands.COMPLETE_REVIEW]: {
 						target: QuizStates.COMPLETED
