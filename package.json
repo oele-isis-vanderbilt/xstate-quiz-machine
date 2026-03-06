@@ -77,7 +77,6 @@
 	},
 	"dependencies": {
 		"@xstate/svelte": "^4.0.5",
-		"xstate": "^5.28.0",
-		"xstate-quiz-machine": "link:"
+		"xstate": "^5.28.0"
 	}
 }
