@@ -423,8 +423,6 @@ export const createQuizMachineV2 = <E, R>(
 						}
 					},
 					[InProgressStages.SKIPPING]: {
-						entry: [sendTo('attemptTick', { type: TimerActorEvents.PAUSE })],
-						exit: [sendTo('attemptTick', { type: TimerActorEvents.RESUME })],
 						on: {
 							[Commands.CONFIRM_SKIP]: [
 								{
