@@ -464,7 +464,7 @@ export const createQuizMachineV2 = <E, R>(
 								},
 								elapsedTime: ({ event, context }) => {
 									const elapsed = event.elapsed!;
-									return context.elapsedTime + Math.ceil(elapsed / 1000);
+									return context.elapsedTime + Math.floor(elapsed / 1000);
 								}
 							})
 						}
@@ -502,7 +502,7 @@ export const createQuizMachineV2 = <E, R>(
 								},
 								elapsedTime: ({ event, context }) => {
 									const elapsed = event.elapsed!;
-									return context.elapsedTime + Math.ceil(elapsed / 1000);
+									return context.elapsedTime + Math.floor(elapsed / 1000);
 								}
 							})
 						}
