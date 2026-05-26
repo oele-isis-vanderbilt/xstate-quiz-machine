@@ -96,6 +96,7 @@ export const createQuizMachineV2 = <E, R>(
 				question?: E;
 				remaining?: number;
 				skippedQuestionId?: string;
+				elapsed?: number;
 			}
 		},
 		delays: {
@@ -337,9 +338,10 @@ export const createQuizMachineV2 = <E, R>(
 					const startTimer = () => {
 						interval = setInterval(() => {
 							const now = Date.now();
-							remaining -= now - start;
+							const elapsed = now - start;
+							remaining -= elapsed;
 							start = now;
-							sendBack({ type: Commands.TICK, remaining });
+							sendBack({ type: Commands.TICK, remaining, elapsed });
 							if (remaining <= 0) {
 								sendBack({ type: Commands.TIMEOUT });
 							}
@@ -459,6 +461,10 @@ export const createQuizMachineV2 = <E, R>(
 								timeLeft: ({ event }) => {
 									const remaining = event.remaining!;
 									return Math.max(0, Math.floor(remaining / 1000));
+								},
+								elapsedTime: ({ event, context }) => {
+									const elapsed = event.elapsed!;
+									return context.elapsedTime + Math.ceil(elapsed / 1000);
 								}
 							})
 						}
@@ -493,6 +499,10 @@ export const createQuizMachineV2 = <E, R>(
 								timeLeft: ({ event }) => {
 									const remaining = event.remaining!;
 									return Math.max(0, Math.floor(remaining / 1000));
+								},
+								elapsedTime: ({ event, context }) => {
+									const elapsed = event.elapsed!;
+									return context.elapsedTime + Math.ceil(elapsed / 1000);
 								}
 							})
 						}
