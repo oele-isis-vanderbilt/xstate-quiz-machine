@@ -229,7 +229,8 @@
 		{/if}
 		{#if $snapshot.matches(QuizStates.REVIEWING) || $snapshot.matches(QuizStates.IN_PROGRESS)}
 			<div class="flex w-full flex-col gap-2 bg-gray-400 p-2">
-				Time Left: {$snapshot.context.timeLeft} seconds | {getDisplayText($snapshot)}
+				Time Left: {$snapshot.context.timeLeft} seconds | Time Elapsed: {$snapshot.context
+					.elapsedTime} seconds | {getDisplayText($snapshot)}
 			</div>
 		{/if}
 		{#if $snapshot.matches(QuizStates.IN_PROGRESS)}
